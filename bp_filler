@@ -1,6 +1,7 @@
 -- ─────────────────────────────────────────────────────────────
 --  STANDALONE BLUEPRINT FILLER
 --  Self-contained. No hub, no WindUI, no external fetches.
+--  Responsive: adapts to phone screens, resizable, touch-friendly.
 -- ─────────────────────────────────────────────────────────────
 
 -- ─────────── cleanup previous instance ───────────
@@ -223,13 +224,33 @@ gui.Name = "BPFillerStandalone"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.DisplayOrder = 100
+gui.IgnoreGuiInset = false
 gui.Parent = plr:WaitForChild("PlayerGui")
 _G._BPFillerGui = gui
 
+-- ── responsive panel sizing ──
+local camera = workspace.CurrentCamera
+local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+local isSmallScreen = viewport.X < 800 or viewport.Y < 600
+
+local function computePanelSize(vp)
+    if not vp then vp = Vector2.new(1280, 720) end
+    local small = vp.X < 800 or vp.Y < 600
+    if small then
+        return math.clamp(vp.X - 20, 240, 420),
+               math.clamp(vp.Y - 40, 300, 620)
+    end
+    return math.clamp(vp.X * 0.35, 380, 460),
+           math.clamp(vp.Y * 0.75, 420, 640)
+end
+
+local panelW, panelH = computePanelSize(viewport)
+
 -- main panel
 local panel = Instance.new("Frame")
-panel.Size = UDim2.fromOffset(420, 620)
-panel.Position = UDim2.new(0.5, -210, 0.5, -310)
+panel.Name = "MainPanel"
+panel.Size = UDim2.fromOffset(panelW, panelH)
+panel.Position = UDim2.new(0.5, -panelW / 2, 0.5, -panelH / 2)
 panel.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
 panel.BorderSizePixel = 0
 panel.Active = true
@@ -294,7 +315,7 @@ body.Size = UDim2.new(1, -20, 1, -54)
 body.Position = UDim2.fromOffset(10, 46)
 body.BackgroundTransparency = 1
 body.BorderSizePixel = 0
-body.ScrollBarThickness = 5
+body.ScrollBarThickness = 6
 body.ScrollBarImageColor3 = Color3.fromRGB(90, 90, 105)
 body.CanvasSize = UDim2.new(0, 0, 0, 0)
 body.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -304,10 +325,41 @@ local layout = Instance.new("UIListLayout", body)
 layout.Padding = UDim.new(0, 8)
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 
+-- ── resize handle (bottom-right corner) ──
+local resizeHandle = Instance.new("TextButton")
+resizeHandle.Size = UDim2.fromOffset(20, 20)
+resizeHandle.Position = UDim2.new(1, -24, 1, -24)
+resizeHandle.BackgroundColor3 = Color3.fromRGB(50, 50, 62)
+resizeHandle.BorderSizePixel = 0
+resizeHandle.Text = ""
+resizeHandle.AutoButtonColor = false
+resizeHandle.Parent = panel
+Instance.new("UICorner", resizeHandle).CornerRadius = UDim.new(0, 5)
+
+for i = 1, 3 do
+    local line = Instance.new("Frame")
+    line.Size = UDim2.fromOffset(10 - i * 2, 1)
+    line.Position = UDim2.fromOffset(4, 5 + i * 3)
+    line.BackgroundColor3 = Color3.fromRGB(150, 150, 170)
+    line.BorderSizePixel = 0
+    line.Parent = resizeHandle
+end
+
 -- ─────────── UI factory helpers ───────────
+-- Larger touch targets for mobile
+local ROW_SECTION  = 26
+local ROW_PARA     = 48
+local ROW_BTN      = 40
+local ROW_BTN_DESC = 54
+local ROW_TOGGLE   = 42
+local ROW_TOG_DESC = 54
+local ROW_INPUT    = 36
+local ROW_SLIDER   = 54
+local ROW_DROPDOWN = 36
+
 local function makeSection(text, order)
     local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 0, 24)
+    lbl.Size = UDim2.new(1, 0, 0, ROW_SECTION)
     lbl.BackgroundTransparency = 1
     lbl.Text = "  " .. text
     lbl.TextColor3 = Color3.fromRGB(160, 160, 180)
@@ -321,7 +373,7 @@ end
 
 local function makeParagraph(title, desc, order, color)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 44)
+    frame.Size = UDim2.new(1, 0, 0, ROW_PARA)
     frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
@@ -330,7 +382,7 @@ local function makeParagraph(title, desc, order, color)
 
     local t = Instance.new("TextLabel")
     t.Size = UDim2.new(1, -16, 0, 18)
-    t.Position = UDim2.fromOffset(8, 4)
+    t.Position = UDim2.fromOffset(8, 5)
     t.BackgroundTransparency = 1
     t.Text = title
     t.TextColor3 = Color3.fromRGB(220, 220, 230)
@@ -340,8 +392,8 @@ local function makeParagraph(title, desc, order, color)
     t.Parent = frame
 
     local d = Instance.new("TextLabel")
-    d.Size = UDim2.new(1, -16, 0, 20)
-    d.Position = UDim2.fromOffset(8, 20)
+    d.Size = UDim2.new(1, -16, 0, 22)
+    d.Position = UDim2.fromOffset(8, 22)
     d.BackgroundTransparency = 1
     d.Text = desc
     d.TextColor3 = color or Color3.fromRGB(150, 150, 165)
@@ -356,7 +408,7 @@ end
 
 local function makeButton(text, desc, onClick, order)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, desc and 48 or 34)
+    btn.Size = UDim2.new(1, 0, 0, desc and ROW_BTN_DESC or ROW_BTN)
     btn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
     btn.BorderSizePixel = 0
     btn.Text = ""
@@ -370,7 +422,7 @@ local function makeButton(text, desc, onClick, order)
 
     local t = Instance.new("TextLabel")
     t.Size = UDim2.new(1, -16, 0, 18)
-    t.Position = UDim2.fromOffset(8, desc and 4 or 8)
+    t.Position = UDim2.fromOffset(8, desc and 5 or 10)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = Color3.fromRGB(230, 230, 240)
@@ -381,8 +433,8 @@ local function makeButton(text, desc, onClick, order)
 
     if desc then
         local d = Instance.new("TextLabel")
-        d.Size = UDim2.new(1, -16, 0, 20)
-        d.Position = UDim2.fromOffset(8, 22)
+        d.Size = UDim2.new(1, -16, 0, 24)
+        d.Position = UDim2.fromOffset(8, 24)
         d.BackgroundTransparency = 1
         d.Text = desc
         d.TextColor3 = Color3.fromRGB(140, 140, 155)
@@ -402,7 +454,7 @@ end
 
 local function makeToggle(text, desc, default, onChange, order)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, desc and 48 or 36)
+    frame.Size = UDim2.new(1, 0, 0, desc and ROW_TOG_DESC or ROW_TOGGLE)
     frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
@@ -411,7 +463,7 @@ local function makeToggle(text, desc, default, onChange, order)
 
     local t = Instance.new("TextLabel")
     t.Size = UDim2.new(1, -70, 0, 18)
-    t.Position = UDim2.fromOffset(8, desc and 4 or 9)
+    t.Position = UDim2.fromOffset(8, desc and 5 or 12)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = Color3.fromRGB(220, 220, 230)
@@ -422,8 +474,8 @@ local function makeToggle(text, desc, default, onChange, order)
 
     if desc then
         local d = Instance.new("TextLabel")
-        d.Size = UDim2.new(1, -70, 0, 20)
-        d.Position = UDim2.fromOffset(8, 22)
+        d.Size = UDim2.new(1, -70, 0, 24)
+        d.Position = UDim2.fromOffset(8, 24)
         d.BackgroundTransparency = 1
         d.Text = desc
         d.TextColor3 = Color3.fromRGB(140, 140, 155)
@@ -436,26 +488,26 @@ local function makeToggle(text, desc, default, onChange, order)
 
     local state = default
     local switch = Instance.new("TextButton")
-    switch.Size = UDim2.fromOffset(46, 24)
-    switch.Position = UDim2.new(1, -54, 0.5, -12)
+    switch.Size = UDim2.fromOffset(48, 26)
+    switch.Position = UDim2.new(1, -56, 0.5, -13)
     switch.BackgroundColor3 = state and Color3.fromRGB(40, 130, 70) or Color3.fromRGB(50, 50, 62)
     switch.BorderSizePixel = 0
     switch.Text = ""
     switch.Parent = frame
-    Instance.new("UICorner", switch).CornerRadius = UDim.new(0, 12)
+    Instance.new("UICorner", switch).CornerRadius = UDim.new(0, 13)
 
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(18, 18)
-    knob.Position = state and UDim2.new(1, -21, 0, 3) or UDim2.fromOffset(3, 3)
+    knob.Size = UDim2.fromOffset(20, 20)
+    knob.Position = state and UDim2.new(1, -22, 0, 3) or UDim2.fromOffset(3, 3)
     knob.BackgroundColor3 = Color3.fromRGB(235, 235, 240)
     knob.BorderSizePixel = 0
     knob.Parent = switch
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 9)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 10)
 
     local function setState(v)
         state = v
         switch.BackgroundColor3 = state and Color3.fromRGB(40, 130, 70) or Color3.fromRGB(50, 50, 62)
-        knob.Position = state and UDim2.new(1, -21, 0, 3) or UDim2.fromOffset(3, 3)
+        knob.Position = state and UDim2.new(1, -22, 0, 3) or UDim2.fromOffset(3, 3)
     end
 
     switch.MouseButton1Click:Connect(function()
@@ -468,7 +520,7 @@ end
 
 local function makeInput(text, default, onChange, order)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 32)
+    frame.Size = UDim2.new(1, 0, 0, ROW_INPUT)
     frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
@@ -476,7 +528,7 @@ local function makeInput(text, default, onChange, order)
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.fromOffset(100, 32)
+    t.Size = UDim2.fromOffset(110, ROW_INPUT)
     t.Position = UDim2.fromOffset(8, 0)
     t.BackgroundTransparency = 1
     t.Text = text
@@ -487,8 +539,8 @@ local function makeInput(text, default, onChange, order)
     t.Parent = frame
 
     local box = Instance.new("TextBox")
-    box.Size = UDim2.new(1, -120, 0, 24)
-    box.Position = UDim2.new(1, -108, 0.5, -12)
+    box.Size = UDim2.new(1, -130, 0, 26)
+    box.Position = UDim2.new(1, -118, 0.5, -13)
     box.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
     box.BorderSizePixel = 0
     box.Text = tostring(default)
@@ -511,7 +563,7 @@ end
 
 local function makeSlider(text, min, max, default, onChange, order)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 50)
+    frame.Size = UDim2.new(1, 0, 0, ROW_SLIDER)
     frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
@@ -520,7 +572,7 @@ local function makeSlider(text, min, max, default, onChange, order)
 
     local t = Instance.new("TextLabel")
     t.Size = UDim2.new(1, -70, 0, 18)
-    t.Position = UDim2.fromOffset(8, 4)
+    t.Position = UDim2.fromOffset(8, 5)
     t.BackgroundTransparency = 1
     t.Text = text
     t.TextColor3 = Color3.fromRGB(220, 220, 230)
@@ -531,7 +583,7 @@ local function makeSlider(text, min, max, default, onChange, order)
 
     local valLbl = Instance.new("TextLabel")
     valLbl.Size = UDim2.fromOffset(60, 18)
-    valLbl.Position = UDim2.new(1, -68, 0, 4)
+    valLbl.Position = UDim2.new(1, -68, 0, 5)
     valLbl.BackgroundTransparency = 1
     valLbl.Text = tostring(default)
     valLbl.TextColor3 = Color3.fromRGB(180, 220, 190)
@@ -541,34 +593,35 @@ local function makeSlider(text, min, max, default, onChange, order)
     valLbl.Parent = frame
 
     local track = Instance.new("Frame")
-    track.Size = UDim2.new(1, -16, 0, 6)
-    track.Position = UDim2.fromOffset(8, 34)
+    track.Size = UDim2.new(1, -16, 0, 8)
+    track.Position = UDim2.fromOffset(8, 36)
     track.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
     track.BorderSizePixel = 0
     track.Parent = frame
-    Instance.new("UICorner", track).CornerRadius = UDim.new(0, 3)
+    Instance.new("UICorner", track).CornerRadius = UDim.new(0, 4)
 
     local fill = Instance.new("Frame")
     fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
     fill.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
     fill.BorderSizePixel = 0
     fill.Parent = track
-    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 4)
 
     local knob = Instance.new("Frame")
-    knob.Size = UDim2.fromOffset(14, 14)
+    knob.Size = UDim2.fromOffset(18, 18)
     knob.AnchorPoint = Vector2.new(0.5, 0.5)
     knob.Position = UDim2.new((default - min) / (max - min), 0, 0.5, 0)
     knob.BackgroundColor3 = Color3.fromRGB(230, 230, 240)
     knob.BorderSizePixel = 0
     knob.Parent = track
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 7)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(0, 9)
 
     local dragging = false
 
     local function setFromX(x)
         local abs = track.AbsolutePosition.X
         local size = track.AbsoluteSize.X
+        if size <= 0 then return end
         local frac = math.clamp((x - abs) / size, 0, 1)
         local val = min + (max - min) * frac
         fill.Size = UDim2.new(frac, 0, 1, 0)
@@ -578,24 +631,25 @@ local function makeSlider(text, min, max, default, onChange, order)
         if not ok then warn("[BPFiller] slider error: " .. tostring(err)) end
     end
 
-    track.InputBegan:Connect(function(input)
+    -- use InputBegan on the whole frame for easier mobile hit
+    frame.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             setFromX(input.Position.X)
         end
     end)
-    track.InputEnded:Connect(function(input)
+    frame.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
     UIS.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             setFromX(input.Position.X)
         end
     end)
     UIS.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
@@ -603,7 +657,7 @@ end
 
 local function makeDropdown(text, values, default, onChange, order)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 32)
+    frame.Size = UDim2.new(1, 0, 0, ROW_DROPDOWN)
     frame.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
     frame.BorderSizePixel = 0
     frame.LayoutOrder = order
@@ -611,7 +665,7 @@ local function makeDropdown(text, values, default, onChange, order)
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
     local t = Instance.new("TextLabel")
-    t.Size = UDim2.fromOffset(100, 32)
+    t.Size = UDim2.fromOffset(110, ROW_DROPDOWN)
     t.Position = UDim2.fromOffset(8, 0)
     t.BackgroundTransparency = 1
     t.Text = text
@@ -622,8 +676,8 @@ local function makeDropdown(text, values, default, onChange, order)
     t.Parent = frame
 
     local sel = Instance.new("TextButton")
-    sel.Size = UDim2.new(1, -120, 0, 24)
-    sel.Position = UDim2.new(1, -108, 0.5, -12)
+    sel.Size = UDim2.new(1, -130, 0, 26)
+    sel.Position = UDim2.new(1, -118, 0.5, -13)
     sel.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
     sel.BorderSizePixel = 0
     sel.Text = tostring(default)
@@ -639,8 +693,8 @@ local function makeDropdown(text, values, default, onChange, order)
     local currentValues = values
 
     local listFrame = Instance.new("Frame")
-    listFrame.Size = UDim2.fromOffset(160, math.min(#values * 24 + 8, 160))
-    listFrame.Position = UDim2.new(1, -108, 1, 2)
+    listFrame.Size = UDim2.fromOffset(160, math.min(#values * 26 + 8, 180))
+    listFrame.Position = UDim2.new(1, -118, 1, 2)
     listFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
     listFrame.BorderSizePixel = 0
     listFrame.Visible = false
@@ -663,7 +717,7 @@ local function makeDropdown(text, values, default, onChange, order)
         entries = {}
         for i, v in ipairs(currentValues) do
             local item = Instance.new("TextButton")
-            item.Size = UDim2.new(1, -4, 0, 22)
+            item.Size = UDim2.new(1, -4, 0, 24)
             item.BackgroundColor3 = Color3.fromRGB(28, 28, 34)
             item.BorderSizePixel = 0
             item.Text = tostring(v)
@@ -681,7 +735,7 @@ local function makeDropdown(text, values, default, onChange, order)
             end)
             table.insert(entries, item)
         end
-        listFrame.Size = UDim2.fromOffset(160, math.min(#currentValues * 24 + 8, 160))
+        listFrame.Size = UDim2.fromOffset(160, math.min(#currentValues * 26 + 8, 180))
     end
     rebuildEntries()
 
@@ -834,7 +888,7 @@ local function startClickMode()
     clickMode = true
     clickConn = UIS.InputBegan:Connect(function(input, gp)
         if gp then return end
-        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
         if not clickMode then return end
         if not gui.Parent then return end
 
@@ -885,7 +939,7 @@ local function startPickMode()
 
     pickConn = UIS.InputBegan:Connect(function(input, gp)
         if gp then return end
-        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then return end
         if not pickMode then return end
 
         local target = Mouse.Target
@@ -1018,18 +1072,20 @@ makeSection("STATUS", nextOrder())
 
 statusPara = makeParagraph("Status", "Ready - pick a plank to begin", nextOrder())
 
--- minimize / close
+-- ─────────── minimize / close / resize ───────────
 local minimized = false
 local savedSize = panel.Size
 minimizeBtn.MouseButton1Click:Connect(function()
     minimized = not minimized
     if minimized then
         savedSize = panel.Size
-        panel.Size = UDim2.fromOffset(420, 42)
+        panel.Size = UDim2.fromOffset(panel.AbsoluteSize.X, 42)
         body.Visible = false
+        resizeHandle.Visible = false
     else
         panel.Size = savedSize
         body.Visible = true
+        resizeHandle.Visible = true
     end
 end)
 
@@ -1038,6 +1094,64 @@ closeBtn.MouseButton1Click:Connect(function()
     _G._BPFillerGui = nil
 end)
 
+-- resize handle drag
+local resizing = false
+local resizeStartMouse, resizeStartSize
+
+resizeHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        resizing = true
+        resizeStartMouse = UIS:GetMouseLocation()
+        resizeStartSize = panel.AbsoluteSize
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if not resizing then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+    or input.UserInputType == Enum.UserInputType.Touch then
+        local cur = UIS:GetMouseLocation()
+        local dx = cur.X - resizeStartMouse.X
+        local dy = cur.Y - resizeStartMouse.Y
+        local newW = math.clamp(resizeStartSize.X + dx, 240, 700)
+        local newH = math.clamp(resizeStartSize.Y + dy, 260, 900)
+        panel.Size = UDim2.fromOffset(newW, newH)
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+    or input.UserInputType == Enum.UserInputType.Touch then
+        resizing = false
+    end
+end)
+
+-- viewport change listener (rotate phone, resize window)
+local function onViewportChange()
+    local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+    if not vp then return end
+    local w, h = computePanelSize(vp)
+    -- only shrink if the panel is larger than the new max
+    local curW = panel.AbsoluteSize.X
+    local curH = panel.AbsoluteSize.Y
+    if curW > w or curH > h then
+        panel.Size = UDim2.fromOffset(math.min(curW, w), math.min(curH, h))
+    end
+    -- clamp position on-screen
+    local pos = panel.AbsolutePosition
+    local size = panel.AbsoluteSize
+    local nx = math.clamp(pos.X, 0, math.max(0, vp.X - size.X))
+    local ny = math.clamp(pos.Y, 0, math.max(0, vp.Y - size.Y))
+    if nx ~= pos.X or ny ~= pos.Y then
+        panel.Position = UDim2.fromOffset(nx, ny)
+    end
+end
+
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(onViewportChange)
+end
+
 -- ─────────── BACKGROUND LOOPS ───────────
 RunService.Heartbeat:Connect(function(dt)
     if not gui.Parent then return end
@@ -1045,9 +1159,6 @@ RunService.Heartbeat:Connect(function(dt)
     if lastScanAccum >= SCAN_INTERVAL then
         lastScanAccum = 0
         updateInventory()
-    end
-    if loopMode then
-        -- handled separately to avoid hammering
     end
 end)
 
@@ -1067,4 +1178,4 @@ task.spawn(function()
     pcall(updateInventory)
 end)
 
-print("[BPFiller] Loaded. Draggable by the title bar. Close with the X button.")
+print("[BPFiller] Loaded. Drag title bar to move. Drag bottom-right corner to resize. X to close.")

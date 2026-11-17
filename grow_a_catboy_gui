@@ -1,0 +1,875 @@
+local TITLE = "Grow a catboy GUI"
+local HIDE_KEY = Enum.KeyCode.Quote
+local START_AT = Vector2.new(30, 60)
+local INSET_Y = 0
+local COOLDOWN = 1.25
+
+local Workspace = game:GetService("Workspace")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local lp = Players.LocalPlayer
+local Remotes = game:GetService("ReplicatedStorage"):WaitForChild("Remotes")
+
+-- Smooth tween movement function used for Headpats and Hatching
+local function smoothMoveTo(targetCFrame)
+    local char = lp.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then 
+        lw.teleport(targetCFrame)
+        return 
+    end
+    
+    local dist = (hrp.Position - targetCFrame.Position).Magnitude
+    local speed = 65 -- studs per second travel speed
+    local duration = math.clamp(dist / speed, 0.1, 1.2)
+    
+    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
+    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+end
+
+local function computeWheelPos()
+    local bases = Workspace:FindFirstChild("Lobby") and Workspace.Lobby:FindFirstChild("Bases")
+    local slot = lp:GetAttributes().PlotSlot
+    local mine = bases and slot and bases:FindFirstChild("Base" .. tostring(slot))
+    local ref = bases and bases:FindFirstChild("Base8")
+    local myTread = mine and mine:FindFirstChild("Treadmill")
+    local refTread = ref and ref:FindFirstChild("Treadmill")
+    if not myTread or not refTread then
+        warn("couldn't find your treadmill, using the old wheel_pos")
+        return CFrame.new(-261, 7, 570)
+    end
+    local rel = refTread:GetPivot():ToObjectSpace(CFrame.new(-261, 7, 570))
+    return CFrame.new((myTread:GetPivot() * rel).Position)
+end
+
+local wheel_pos = computeWheelPos()
+print("wheel_pos", wheel_pos.Position)
+
+local state = { master = false, wheel = false, headpat = false, running = true, shown = true, guardGate = true, autoPlot = false }
+
+local zones = {
+    { name = "Zone 1",  folder = "Zone1",  child = "Basket",  enabled = true,  hold = 2 },
+    { name = "Zone 2",  folder = "Zone2",  child = "Crate",   enabled = true,  hold = 1.5 },
+    { name = "Zone 3",  folder = "Zone3",  child = "Capsule", enabled = false, hold = 1.5 },
+    { name = "Zone 4",  folder = "Zone4",  child = "Tray",    enabled = false, hold = 1.5 },
+    { name = "Zone 5",  folder = "Zone5",  child = "Box",     enabled = false, hold = 1.5 },
+    { name = "Zone 6",  folder = "Zone6",  enabled = false, hold = 1.5 },
+    { name = "Zone 7",  folder = "Zone7",  enabled = false, hold = 1.5 },
+    { name = "Zone 8",  folder = "Zone8",  enabled = false, hold = 1.5 },
+    { name = "Zone 9",  folder = "Zone9",  enabled = false, hold = 1.5 },
+    { name = "Zone 10", folder = "Zone10", enabled = false, hold = 1.5 },
+}
+
+local warned = {}
+local function set(inst, props)
+    for k, v in props do
+        local ok, err = pcall(function() inst[k] = v end)
+        if not ok then
+            local key = tostring(inst.ClassName) .. "." .. k
+            if not warned[key] then
+                warned[key] = true
+                warn("couldn't set " .. key .. ": " .. tostring(err))
+            end
+        end
+    end
+end
+
+local function make(class, parent, props)
+    local inst = Instance.new(class, parent)
+    set(inst, props)
+    return inst
+end
+
+local function try(fn)
+    local ok, v = pcall(fn)
+    if ok then return v end
+end
+
+local FONT = try(function() return Enum.Font.GothamMedium end)
+local FONT_BOLD = try(function() return Enum.Font.GothamBold end)
+local FONT_CODE = try(function() return Enum.Font.Code end)
+local LEFT = try(function() return Enum.TextXAlignment.Left end)
+local CENTER = try(function() return Enum.TextXAlignment.Center end)
+
+local C = {
+    bg = Color3.fromRGB(18, 18, 24),
+    card = Color3.fromRGB(28, 28, 38),
+    title = Color3.fromRGB(24, 24, 32),
+    btn = Color3.fromRGB(46, 46, 62),
+    accent = Color3.fromRGB(236, 112, 168),
+    off = Color3.fromRGB(70, 70, 88),
+    text = Color3.fromRGB(236, 236, 242),
+    dim = Color3.fromRGB(150, 150, 168),
+    knob = Color3.fromRGB(245, 245, 250),
+}
+
+for _, name in { "EggFarmGui", "CatboyGui" } do
+    local old = gethui():FindFirstChild(name)
+    if old then old:Destroy() end
+end
+
+local WIN_W, WIN_H, TITLE_H, TAB_H = 840, 580, 34, 30
+local PAGE_Y = TITLE_H + TAB_H
+local PAGE_H = WIN_H - PAGE_Y - 26
+local origin = START_AT
+
+local function corner(inst)
+    pcall(function() Instance.new("UICorner", inst) end)
+end
+
+local function frame(parent, x, y, w, h, color, round)
+    local f = make("Frame", parent, {
+        Position = UDim2.fromOffset(x, y),
+        Size = UDim2.fromOffset(w, h),
+        BackgroundColor3 = color,
+        BorderSizePixel = 0,
+    })
+    if round then corner(f) end
+    return f
+end
+
+local function text(parent, x, y, w, h, str, size, color, align, font)
+    return make("TextLabel", parent, {
+        Position = UDim2.fromOffset(x, y),
+        Size = UDim2.fromOffset(w, h),
+        Text = str,
+        TextSize = size or 13,
+        TextColor3 = color or C.text,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Font = font or FONT,
+        TextXAlignment = align or LEFT,
+    })
+end
+
+local gui = make("ScreenGui", gethui(), { Name = "CatboyGui", IgnoreGuiInset = true })
+local root = frame(gui, origin.X, origin.Y, WIN_W, WIN_H, C.bg, true)
+
+local hits = {}
+local refreshers = {}
+local tabs = {}
+local activeTab
+
+local function newArea(tab, parent, ox, oy)
+    return { tab = tab, parent = parent, x = ox, y = oy + (tab and PAGE_Y or 0) }
+end
+
+local function rect(a, x, y, w, h, onClick)
+    hits[#hits + 1] = { tab = a.tab, x = a.x + x, y = a.y + y, w = w, h = h, onClick = onClick }
+end
+
+local function button(a, x, y, w, h, str, onClick)
+    local f = make("TextLabel", a.parent, {
+        Position = UDim2.fromOffset(x, y),
+        Size = UDim2.fromOffset(w, h),
+        Text = str,
+        TextSize = 13,
+        TextColor3 = C.text,
+        BackgroundColor3 = C.btn,
+        BorderSizePixel = 0,
+        Font = FONT,
+    })
+    corner(f)
+    rect(a, x, y, w, h, onClick)
+    return f
+end
+
+local function switch(a, x, y, w, str, get, toggle)
+    local track = frame(a.parent, x, y + 3, 34, 18, C.off, true)
+    local knob = frame(a.parent, x + 2, y + 5, 14, 14, C.knob, true)
+    text(a.parent, x + 44, y, w - 44, 24, str, 13)
+    rect(a, x, y, w, 24, toggle)
+    refreshers[#refreshers + 1] = function()
+        local on = get()
+        set(track, { BackgroundColor3 = on and C.accent or C.off })
+        set(knob, { Position = UDim2.fromOffset(x + (on and 18 or 2), y + 5) })
+    end
+end
+
+local function refresh()
+    for _, fn in refreshers do fn() end
+end
+
+local function selectTab(tab)
+    activeTab = tab
+    for _, t in tabs do
+        local on = t == tab
+        set(t.page, { Position = UDim2.fromOffset(on and 0 or -10000, PAGE_Y) })
+        set(t.label, { TextColor3 = on and C.text or C.dim })
+        set(t.underline, { BackgroundTransparency = on and 0 or 1 })
+    end
+end
+
+local function addTab(name)
+    local i = #tabs + 1
+    local tw = 95
+    local x = 10 + (i - 1) * (tw + 6)
+    local page = make("Frame", root, {
+        Position = UDim2.fromOffset(i == 1 and 0 or -10000, PAGE_Y),
+        Size = UDim2.fromOffset(WIN_W, PAGE_H),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+    })
+    local label = text(root, x, TITLE_H, tw, TAB_H - 2, name, 12, C.dim, CENTER, FONT_BOLD)
+    local underline = frame(root, x, TITLE_H + TAB_H - 3, tw, 2, C.accent)
+    local tab = { name = name, page = page, label = label, underline = underline }
+    tabs[i] = tab
+    hits[#hits + 1] = { tab = nil, x = x, y = TITLE_H, w = tw, h = TAB_H, onClick = function() selectTab(tab) end }
+    return tab
+end
+
+frame(root, 0, 0, WIN_W, TITLE_H, C.title, true)
+frame(root, 0, 12, WIN_W, TITLE_H - 12, C.title)
+frame(root, 0, 0, WIN_W, 3, C.accent)
+text(root, 14, 4, WIN_W - 60, TITLE_H - 4, TITLE, 15, C.text, LEFT, FONT_BOLD)
+frame(root, 0, TITLE_H, WIN_W, TAB_H, C.bg)
+
+local closeLabel = make("TextLabel", root, {
+    Position = UDim2.fromOffset(WIN_W - 34, 6),
+    Size = UDim2.fromOffset(26, 24),
+    Text = "X",
+    TextSize = 13,
+    TextColor3 = C.text,
+    BackgroundColor3 = C.btn,
+    BorderSizePixel = 0,
+    Font = FONT_BOLD,
+})
+corner(closeLabel)
+hits[#hits + 1] = {
+    tab = nil, x = WIN_W - 34, y = 6, w = 26, h = 24,
+    onClick = function()
+        state.running = false
+        state.master = false
+        state.wheel = false
+        state.headpat = false
+        state.autoPlot = false
+    end,
+}
+
+frame(root, 0, WIN_H - 26, WIN_W, 26, C.title, true)
+frame(root, 0, WIN_H - 26, WIN_W, 12, C.title)
+local statusLabel = text(root, 12, WIN_H - 26, WIN_W - 24, 26, "Status: idle", 12, C.dim)
+
+-- Tabs Setup
+local farmTab = addTab("Autofarm")
+local bpTab = addTab("Backpack")
+local plotTab = addTab("Plot")
+local tpTab = addTab("Teleports")
+
+-- Helper to pet all active catboys on your plot using smooth tweening
+local function petAllCatboys()
+    local slot = lp:GetAttributes().PlotSlot or 4
+    local placedFolder = Workspace:FindFirstChild("Runtime") and Workspace.Runtime:FindFirstChild("Placed")
+    if not placedFolder then return end
+
+    for _, item in ipairs(placedFolder:GetChildren()) do
+        pcall(function()
+            local attrs = item:GetAttributes()
+            if attrs.BaseIndex == slot or attrs.PlotSlot == slot or attrs.OwnerUserId == lp.UserId then
+                if attrs.ItemKind == "Catboy" and attrs.ItemId and (item:IsA("BasePart") or item:IsA("Model")) then
+                    local pivot = item:GetPivot()
+                    smoothMoveTo(pivot + Vector3.new(0, 3, 0))
+                    task.wait(0.2)
+                    lw.fire(Remotes.CatboyAction, {itemId = attrs.ItemId, action = "pet"})
+                    task.wait(0.3)
+                end
+            end
+        end)
+    end
+    smoothMoveTo(wheel_pos)
+end
+
+-- TAB 1: Autofarm
+local ctrlCard = frame(farmTab.page, 14, 14, 280, 474, C.card, true)
+local ctrl = newArea(farmTab, ctrlCard, 14, 14)
+
+text(ctrlCard, 14, 14, 240, 18, "CONTROL", 11, C.dim, LEFT, FONT_BOLD)
+switch(ctrl, 14, 44, 250, "Egg autofarm", function() return state.master end, function() state.master = not state.master end)
+switch(ctrl, 14, 86, 250, "Wheel autofarm", function() return state.wheel end, function() state.wheel = not state.wheel end)
+switch(ctrl, 14, 128, 250, "Auto Headpats", function() return state.headpat end, function() state.headpat = not state.headpat end)
+switch(ctrl, 14, 170, 250, "Guard check", function() return state.guardGate end, function() state.guardGate = not state.guardGate end)
+
+button(ctrl, 14, 222, 250, 36, "Headpat All Placed Catboys", function()
+    petAllCatboys()
+end)
+
+button(ctrl, 14, 268, 250, 36, "Teleport to wheel", function()
+    lw.teleport(wheel_pos)
+end)
+
+text(ctrlCard, 14, 408, 250, 18, "' (quote)  hide / show", 11, C.dim)
+
+local zoneCard = frame(farmTab.page, 308, 14, 518, 474, C.card, true)
+local zoneArea = newArea(farmTab, zoneCard, 308, 14)
+
+text(zoneCard, 14, 14, 200, 18, "ZONES", 11, C.dim, LEFT, FONT_BOLD)
+text(zoneCard, 260, 14, 200, 18, "hold time", 11, C.dim, CENTER)
+
+for i, z in zones do
+    z.index = i
+    local ry = 40 + (i - 1) * 38
+    switch(zoneArea, 14, ry, 210, z.name, function() return z.enabled end, function() z.enabled = not z.enabled end)
+    button(zoneArea, 250, ry + 2, 32, 26, "-", function() z.hold = math.max(0.5, z.hold - 0.25) end)
+    z.timeLabel = text(zoneCard, 292, ry, 74, 26, "", 13, C.text, CENTER)
+    button(zoneArea, 376, ry + 2, 32, 26, "+", function() z.hold = math.min(6, z.hold + 0.25) end)
+    refreshers[#refreshers + 1] = function()
+        set(z.timeLabel, { Text = string.format("%.2fs", z.hold) })
+    end
+end
+
+-- TAB 2: Backpack Viewer Panel
+local bpCard = frame(bpTab.page, 14, 14, 812, 474, C.card, true)
+local bpArea = newArea(bpTab, bpCard, 14, 14)
+
+text(bpCard, 18, 16, 300, 18, "BACKPACK INVENTORY", 12, C.dim, LEFT, FONT_BOLD)
+
+local bpScrollBox = make("ScrollingFrame", bpCard, {
+    Position = UDim2.fromOffset(18, 46),
+    Size = UDim2.fromOffset(776, 350),
+    CanvasSize = UDim2.fromOffset(0, 1200),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 8,
+})
+
+local bpDisplay = text(bpScrollBox, 0, 0, 750, 1200, "Scanning backpack items...", 15, C.text, LEFT, FONT_CODE)
+set(bpDisplay, { TextWrapped = false })
+
+local function scanBackpack()
+    local bp = lp:FindFirstChild("Backpack")
+    local items = bp and bp:GetChildren() or {}
+    
+    local out = {}
+    table.insert(out, string.format("Total Backpack Items: %d", #items))
+    table.insert(out, string.rep("-", 68))
+    
+    if #items == 0 then
+        table.insert(out, "Your backpack is currently empty.")
+    else
+        for i, item in ipairs(items) do
+            pcall(function()
+                local attrs = item:GetAttributes()
+                local itemName = item.Name
+                local rarity = attrs.Rarity or "Common"
+                local income = attrs.Income and ("(+" .. tostring(attrs.Income) .."/s)") or ""
+                local itemId = attrs.ItemId or ""
+                table.insert(out, string.format("[%02d] [%-5s] %-26s  %-10s  %s", i, itemId, tostring(itemName), tostring(rarity), income))
+            end)
+        end
+    end
+
+    local finalStr = table.concat(out, "\n")
+    set(bpDisplay, { Text = finalStr, Size = UDim2.fromOffset(750, #out * 22) })
+    bpScrollBox.CanvasSize = UDim2.fromOffset(0, #out * 22 + 20)
+end
+
+button(bpArea, 18, 408, 150, 40, "Refresh Backpack", function()
+    scanBackpack()
+end)
+
+button(bpArea, 178, 408, 180, 40, "Sell All Catboys", function()
+    local bp = lp:FindFirstChild("Backpack")
+    if not bp then return end
+    
+    local batchIds = {}
+    for _, item in ipairs(bp:GetChildren()) do
+        pcall(function()
+            local attrs = item:GetAttributes()
+            if attrs.ItemKind == "Catboy" and attrs.ItemId then
+                table.insert(batchIds, attrs.ItemId)
+            end
+        end)
+    end
+    
+    if #batchIds > 0 then
+        Remotes.RequestSell:FireServer({itemIds = batchIds})
+    end
+    
+    task.wait(0.5)
+    scanBackpack()
+end)
+
+button(bpArea, 368, 408, 150, 40, "Place All Eggs", function()
+    local bp = lp:FindFirstChild("Backpack")
+    if not bp then return end
+
+    math.randomseed(tick())
+
+    for _, item in ipairs(bp:GetChildren()) do
+        pcall(function()
+            local attrs = item:GetAttributes()
+            if attrs.ItemKind == "Egg" and attrs.ItemId then
+                local rx = math.random(-12, 12)
+                local rz = math.random(1, 16)
+                Remotes.RequestPlaceAt:FireServer({z = rz, x = rx, itemId = attrs.ItemId, yaw = 0})
+                task.wait(0.4)
+            end
+        end)
+    end
+    task.wait(0.5)
+    scanBackpack()
+end)
+
+-- TAB 3: Plot Automation & Management Tab
+local plotCard = frame(plotTab.page, 14, 14, 812, 474, C.card, true)
+local plotArea = newArea(plotTab, plotCard, 14, 14)
+
+text(plotCard, 18, 16, 300, 18, "PLOT AUTOMATION & MANAGEMENT", 12, C.dim, LEFT, FONT_BOLD)
+
+local plotScrollBox = make("ScrollingFrame", plotCard, {
+    Position = UDim2.fromOffset(18, 46),
+    Size = UDim2.fromOffset(776, 340),
+    CanvasSize = UDim2.fromOffset(0, 1200),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 8,
+})
+
+local plotDisplay = text(plotScrollBox, 0, 0, 750, 1200, "Plot automation idle. Click run or toggle auto-manage.", 15, C.text, LEFT, FONT_CODE)
+set(plotDisplay, { TextWrapped = false })
+
+local gridOffsets = {
+    {x = -10, z = 8}, {x = -5, z = 8}, {x = 0, z = 8}, {x = 5, z = 8}, {x = 10, z = 8},
+    {x = -10, z = 13}, {x = -5, z = 13}, {x = 0, z = 13}, {x = 5, z = 13}, {x = 10, z = 13},
+    {x = -10, z = 3}, {x = -5, z = 3}, {x = 0, z = 3}, {x = 5, z = 3}, {x = 10, z = 3},
+}
+
+local function getAvailablePlotSpot()
+    local slot = lp:GetAttributes().PlotSlot or 4
+    local placedFolder = Workspace:FindFirstChild("Runtime") and Workspace.Runtime:FindFirstChild("Placed")
+    
+    local occupied = {}
+    if placedFolder then
+        for _, item in ipairs(placedFolder:GetChildren()) do
+            pcall(function()
+                local attrs = item:GetAttributes()
+                if attrs.BaseIndex == slot or attrs.PlotSlot == slot or attrs.OwnerUserId == lp.UserId then
+                    local pos = item:GetPivot().Position
+                    table.insert(occupied, {x = pos.X, z = pos.Z})
+                end
+            end)
+        end
+    end
+
+    for _, pt in ipairs(gridOffsets) do
+        local clear = true
+        for _, occ in ipairs(occupied) do
+            if math.abs(occ.x - pt.x) < 3 and math.abs(occ.z - pt.z) < 3 then
+                clear = false
+                break
+            end
+        end
+        if clear then
+            return pt.x, pt.z
+        end
+    end
+    return nil, nil
+end
+
+local function holdE(seconds)
+    input.press(Enum.KeyCode.E)
+    task.wait(seconds)
+    input.release(Enum.KeyCode.E)
+end
+
+-- Helper to check if an egg is ready to hatch based on its status attributes
+local function isEggReady(placedItem)
+    local attrs = placedItem:GetAttributes()
+    local status = attrs.Status or attrs.State or attrs.EggState or attrs.Progress
+    -- Check common status indicators for readiness (e.g. "Ready", "Hatchable", numeric max progress, etc.)
+    if status == "Ready" or status == "Hatchable" or status == true then
+        return true
+    end
+    if type(status) == "number" and status >= 100 then
+        return true
+    end
+    -- If no explicit status attribute is found, we check if it has a prompt or specific model child
+    if placedItem:FindFirstChild("ProximityPrompt") or placedItem:FindFirstChild("Interact") then
+        return true
+    end
+    -- Fallback: if we can't find a negative indicator, assume it can be checked
+    return true
+end
+
+local function hatchReadyEggs()
+    local placedFolder = Workspace:FindFirstChild("Runtime") and Workspace.Runtime:FindFirstChild("Placed")
+    if not placedFolder then return end
+    
+    local slot = lp:GetAttributes().PlotSlot or 4
+    for _, placedItem in ipairs(placedFolder:GetChildren()) do
+        pcall(function()
+            local attrs = placedItem:GetAttributes()
+            if attrs.BaseIndex == slot or attrs.PlotSlot == slot or attrs.OwnerUserId == lp.UserId then
+                if attrs.ItemKind == "Egg" or string.find(string.lower(placedItem.Name), "egg") then
+                    if isEggReady(placedItem) and (placedItem:IsA("BasePart") or placedItem:IsA("Model")) then
+                        local pivot = placedItem:GetPivot()
+                        smoothMoveTo(pivot + Vector3.new(0, 3, 0))
+                        task.wait(0.4)
+                        holdE(1.5)
+                    end
+                end
+            end
+        end)
+    end
+    lw.teleport(wheel_pos)
+end
+
+local function spamPlaceAndAutoHatch()
+    local bp = lp:FindFirstChild("Backpack")
+    if not bp then return end
+
+    math.randomseed(tick())
+
+    -- Spam place all eggs from backpack into available slots
+    for _, item in ipairs(bp:GetChildren()) do
+        pcall(function()
+            local attrs = item:GetAttributes()
+            if attrs.ItemKind == "Egg" and attrs.ItemId then
+                local px, pz = getAvailablePlotSpot()
+                if px and pz then
+                    Remotes.RequestPlaceAt:FireServer({z = pz, x = px, itemId = attrs.ItemId, yaw = 0})
+                    task.wait(0.2)
+                end
+            end
+        end)
+    end
+
+    -- Hatch any ready eggs currently on the plot
+    hatchReadyEggs()
+    scanBackpack()
+end
+
+button(plotArea, 18, 416, 140, 40, "Run Execution", function()
+    spamPlaceAndAutoHatch()
+end)
+
+button(plotArea, 168, 416, 140, 40, "Hatch All Ready", function()
+    hatchReadyEggs()
+end)
+
+button(plotArea, 318, 416, 140, 40, "Batch Sell", function()
+    local bp = lp:FindFirstChild("Backpack")
+    if not bp then return end
+    
+    local batchIds = {}
+    for _, item in ipairs(bp:GetChildren()) do
+        pcall(function()
+            local attrs = item:GetAttributes()
+            if attrs.ItemKind == "Catboy" and attrs.ItemId then
+                table.insert(batchIds, attrs.ItemId)
+            end
+        end)
+    end
+    
+    if #batchIds > 0 then
+        Remotes.RequestSell:FireServer({itemIds = batchIds})
+    end
+    
+    task.wait(0.5)
+    scanBackpack()
+end)
+
+button(plotArea, 468, 416, 140, 40, "Equip Best", function()
+    Remotes.RequestEquipBest:FireServer({})
+end)
+
+switch(plotArea, 618, 424, 150, "Auto-Hatch Loop", function() return state.autoPlot end, function()
+    state.autoPlot = not state.autoPlot
+end)
+
+-- TAB 4: Teleports Tab
+local tpCard = frame(tpTab.page, 14, 14, 812, 474, C.card, true)
+
+text(tpCard, 18, 16, 300, 18, "WORLD & ZONE TELEPORTS", 12, C.dim, LEFT, FONT_BOLD)
+
+local tpScrollBox = make("ScrollingFrame", tpCard, {
+    Position = UDim2.fromOffset(18, 46),
+    Size = UDim2.fromOffset(776, 400),
+    CanvasSize = UDim2.fromOffset(0, 650),
+    BackgroundTransparency = 1,
+    BorderSizePixel = 0,
+    ScrollBarThickness = 8,
+})
+
+local function teleportToZoneName(zoneName)
+    local corridor = Workspace:FindFirstChild("Corridor")
+    local zonesFolder = corridor and corridor:FindFirstChild("Zones")
+    local zone = zonesFolder and zonesFolder:FindFirstChild(zoneName)
+    if zone then
+        local nests = zone:FindFirstChild("Nests")
+        if nests and #nests:GetChildren() > 0 then
+            for _, nest in ipairs(nests:GetChildren()) do
+                if nest:IsA("BasePart") then
+                    lw.teleport(nest.CFrame + Vector3.new(0, 3, 0))
+                    print("Teleported to " .. zoneName)
+                    return
+                end
+            end
+        end
+        if zone:IsA("Model") or zone:IsA("BasePart") then
+            lw.teleport(zone:GetPivot() + Vector3.new(0, 3, 0))
+            print("Teleported to " .. zoneName)
+            return
+        end
+    end
+    warn("Could not find zone folder for " .. zoneName)
+end
+
+local function tpButton(x, y, w, h, str, onClick)
+    local f = make("TextLabel", tpScrollBox, {
+        Position = UDim2.fromOffset(x, y),
+        Size = UDim2.fromOffset(w, h),
+        Text = str,
+        TextSize = 13,
+        TextColor3 = C.text,
+        BackgroundColor3 = C.btn,
+        BorderSizePixel = 0,
+        Font = FONT,
+    })
+    corner(f)
+    hits[#hits + 1] = {
+        tab = tpTab,
+        x = 14 + 18 + x,
+        y = PAGE_Y + 14 + 46 + y,
+        w = w,
+        h = h,
+        onClick = onClick
+    }
+    return f
+end
+
+local btnWidth, btnHeight, cols = 175, 40, 4
+local startRowOffset = 0
+
+for i = 1, 10 do
+    local r = math.floor((i - 1) / cols)
+    local c = (i - 1) % cols
+    local bx = c * (btnWidth + 12)
+    local by = r * (btnHeight + 12)
+    startRowOffset = r + 1
+    
+    tpButton(bx, by, btnWidth, btnHeight, "Zone " .. i, function()
+        teleportToZoneName("Zone" .. i)
+    end)
+end
+
+local extraY = startRowOffset * (btnHeight + 12) + 10
+tpButton(0, extraY, btnWidth, btnHeight, "Treadmill / Wheel", function()
+    lw.teleport(wheel_pos)
+end)
+
+tpButton(btnWidth + 12, extraY, btnWidth, btnHeight, "Lobby / Home Base", function()
+    local bases = Workspace:FindFirstChild("Lobby") and Workspace.Lobby:FindFirstChild("Bases")
+    local slot = lp:GetAttributes().PlotSlot
+    local mine = bases and slot and bases:FindFirstChild("Base" .. tostring(slot))
+    if mine then
+        lw.teleport(mine:GetPivot() + Vector3.new(0, 3, 0))
+    else
+        lw.teleport(CFrame.new(0, 7, 0))
+    end
+end)
+
+selectTab(farmTab)
+
+task.spawn(function()
+    while state.running do
+        if state.autoPlot then
+            pcall(function()
+                spamPlaceAndAutoHatch()
+            end)
+            task.wait(3)
+        else
+            task.wait(1)
+        end
+    end
+end)
+
+-- Background loop for Auto Headpats (uses smooth tweening)
+task.spawn(function()
+    while state.running do
+        if state.headpat then
+            pcall(function()
+                petAllCatboys()
+            end)
+            task.wait(10)
+        else
+            task.wait(1)
+        end
+    end
+end)
+
+task.spawn(function()
+    task.wait(1)
+    scanBackpack()
+end)
+
+local lastStatus = ""
+local function setStatus(msg)
+    if msg ~= lastStatus then
+        lastStatus = msg
+        set(statusLabel, { Text = msg })
+    end
+end
+
+local dragging = false
+local dragOffset = Vector2.new(0, 0)
+
+local function inRect(m, x, y, w, h)
+    return m.X >= x and m.X <= x + w and m.Y >= y and m.Y <= y + h
+end
+
+UIS.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+        if not state.shown then return end
+        local m = UIS:GetMouseLocation()
+        local top = origin + Vector2.new(0, INSET_Y)
+
+        for _, h in hits do
+            if (h.tab == nil or h.tab == activeTab) and inRect(m, top.X + h.x, top.Y + h.y, h.w, h.h) then
+                h.onClick()
+                refresh()
+                return
+            end
+        end
+
+        if inRect(m, top.X, top.Y, WIN_W, TITLE_H) then
+            dragging = true
+            dragOffset = m - top
+        end
+    elseif inp.KeyCode == HIDE_KEY then
+        state.shown = not state.shown
+        set(root, { Visible = state.shown })
+    end
+end)
+
+UIS.InputEnded:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if not dragging then return end
+    local m = UIS:GetMouseLocation()
+    local vp = lw.viewport()
+    local pos = m - dragOffset - Vector2.new(0, INSET_Y)
+    origin = Vector2.new(
+        math.clamp(pos.X, 0, math.max(0, vp.X - WIN_W)),
+        math.clamp(pos.Y, 0, math.max(0, vp.Y - WIN_H))
+    )
+    set(root, { Position = UDim2.fromOffset(origin.X, origin.Y) })
+end)
+
+local function getNests(folderName)
+    local corridor = Workspace:FindFirstChild("Corridor")
+    local zonesFolder = corridor and corridor:FindFirstChild("Zones")
+    local zone = zonesFolder and zonesFolder:FindFirstChild(folderName)
+    return zone and zone:FindFirstChild("Nests")
+end
+
+local function guardInfo(zoneIndex)
+    local runtime = Workspace:FindFirstChild("Runtime")
+    local folder = runtime and runtime:FindFirstChild("Guards")
+    if not folder then return nil end
+    for _, g in folder:GetChildren() do
+        local attrs = g:GetAttributes()
+        if attrs.ZoneIndex == zoneIndex then
+            return attrs.GuardState, attrs.TargetUserId
+        end
+    end
+    return nil
+end
+
+local function waitForGuard(z)
+    if not state.guardGate then return true end
+    local waited = 0
+    while state.master and state.running and z.enabled do
+        local gs, target = guardInfo(z.index)
+        if gs == nil or (gs == "Sleep" and (target == nil or target == 0)) then
+            return true
+        end
+        setStatus(string.format("Status: %s guard is %s, waiting", z.name, tostring(gs)))
+        task.wait(0.5)
+        waited += 0.5
+        if waited >= 15 then return false end
+    end
+    return false
+end
+
+local function atWheel()
+    local char = lp.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return true end
+    return (hrp.Position - wheel_pos.Position).Magnitude < 10
+end
+
+local function farmZone(z)
+    local folder = getNests(z.folder)
+    if not folder then
+        setStatus("Status: " .. z.name .. " not found")
+        task.wait(1)
+        return
+    end
+
+    local nests = folder:GetChildren()
+    table.sort(nests, function(a, b) return a.Name < b.Name end)
+
+    for _, nest in nests do
+        if not state.master or not z.enabled or not state.running then return end
+
+        local target = z.child == nil or nest:FindFirstChild(z.child)
+        if target and nest:IsA("BasePart") then
+            if not waitForGuard(z) then continue end
+
+            if not input.focused() then
+                setStatus("Status: click the game window (input needs focus)")
+                task.wait(1)
+                continue
+            end
+
+            setStatus(string.format("Status: %s %s", z.name, nest.Name))
+            lw.teleport(nest.CFrame + Vector3.new(0, 3, 0))
+            task.wait(0.3)
+
+            holdE(z.hold)
+            lw.teleport(wheel_pos)
+            task.wait(COOLDOWN)
+        end
+    end
+end
+
+refresh()
+
+while state.running do
+    if state.master then
+        for _, z in zones do
+            if not state.master or not state.running then break end
+            if z.enabled then
+                farmZone(z)
+            end
+        end
+        if state.master and state.running then
+            lw.teleport(wheel_pos)
+            setStatus("Status: cycle done, starting over")
+            task.wait(1)
+        end
+    elseif state.wheel then
+        if atWheel() then
+            setStatus("Status: on the wheel")
+        else
+            setStatus("Status: going to the wheel")
+            lw.teleport(wheel_pos)
+            task.wait(1)
+        end
+    else
+        setStatus("Status: idle")
+    end
+    task.wait(0.25)
+end
+
+gui:Destroy()
+print("catboy gui closed")

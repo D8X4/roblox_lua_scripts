@@ -1,0 +1,1360 @@
+local TITLE = "Israel Tycoon GUI"
+local HIDE_KEY = Enum.KeyCode.Quote
+local START_AT = Vector2.new(30, 140)
+local INSET_Y = 0
+local ROWS = 10
+local REFRESH_EVERY = 0.75
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local lp = Players.LocalPlayer
+
+local state = { running = true, shown = true }
+local settingsState = {
+	autoCollect = false,
+	autoCollectInterval = 5,
+	autoBuy = false,
+	autoKoth = false,
+	autoKothInterval = 10,
+	autoCrates = false,
+	autoRebirth = false,
+}
+
+local warned = {}
+local function set(inst, props)
+	for k, v in props do
+		local ok, err = pcall(function() inst[k] = v end)
+		if not ok then
+			local key = tostring(inst and inst.ClassName) .. "." .. k
+			if not warned[key] then
+				warned[key] = true
+				warn("couldn't set " .. key .. ": " .. tostring(err))
+			end
+		end
+	end
+end
+
+local function make(class, parent, props)
+	local inst = Instance.new(class, parent)
+	set(inst, props)
+	return inst
+end
+
+local function try(fn)
+	local ok, v = pcall(fn)
+	if ok then return v end
+end
+
+local FONT = try(function() return Enum.Font.GothamMedium end)
+local FONT_BOLD = try(function() return Enum.Font.GothamBold end)
+local LEFT = try(function() return Enum.TextXAlignment.Left end)
+local CENTER = try(function() return Enum.TextXAlignment.Center end)
+
+local C = {
+	bg = Color3.fromRGB(16, 20, 28),
+	card = Color3.fromRGB(26, 32, 44),
+	title = Color3.fromRGB(22, 28, 40),
+	btn = Color3.fromRGB(44, 54, 74),
+	accent = Color3.fromRGB(70, 140, 255),
+	off = Color3.fromRGB(62, 70, 90),
+	text = Color3.fromRGB(236, 238, 244),
+	dim = Color3.fromRGB(150, 158, 176),
+	good = Color3.fromRGB(80, 200, 120),
+	bad = Color3.fromRGB(220, 100, 100),
+}
+
+local oldGui = gethui():FindFirstChild("IsraelTycoonGui")
+if oldGui then oldGui:Destroy() end
+
+local WIN_W, WIN_H, TITLE_H, TAB_H = 560, 520, 34, 30
+local PAGE_Y = TITLE_H + TAB_H
+local PAGE_H = WIN_H - PAGE_Y - 26
+local origin = START_AT
+
+local function corner(inst)
+	pcall(function() Instance.new("UICorner", inst) end)
+end
+
+local function frame(parent, x, y, w, h, color, round)
+	local f = make("Frame", parent, {
+		Position = UDim2.fromOffset(x, y),
+		Size = UDim2.fromOffset(w, h),
+		BackgroundColor3 = color,
+		BorderSizePixel = 0,
+	})
+	if round then corner(f) end
+	return f
+end
+
+local function text(parent, x, y, w, h, str, size, color, align, font)
+	return make("TextLabel", parent, {
+		Position = UDim2.fromOffset(x, y),
+		Size = UDim2.fromOffset(w, h),
+		Text = str,
+		TextSize = size or 13,
+		TextColor3 = color or C.text,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Font = font or FONT,
+		TextXAlignment = align or LEFT,
+	})
+end
+
+local gui = make("ScreenGui", gethui(), { Name = "IsraelTycoonGui", IgnoreGuiInset = true })
+local root = frame(gui, origin.X, origin.Y, WIN_W, WIN_H, C.bg, true)
+
+local hits = {}
+local tabs = {}
+local activeTab
+
+local function newArea(tab, parent, ox, oy)
+	return { tab = tab, parent = parent, x = ox, y = oy + (tab and PAGE_Y or 0) }
+end
+
+local function rect(a, x, y, w, h, onClick)
+	local entry = { tab = a.tab, x = a.x + x, y = a.y + y, w = w, h = h, onClick = onClick }
+	hits[#hits + 1] = entry
+	return entry
+end
+
+local function button(a, x, y, w, h, str, onClick)
+	local f = make("TextLabel", a.parent, {
+		Position = UDim2.fromOffset(x, y),
+		Size = UDim2.fromOffset(w, h),
+		Text = str,
+		TextSize = 13,
+		TextColor3 = C.text,
+		BackgroundColor3 = C.btn,
+		BorderSizePixel = 0,
+		Font = FONT,
+	})
+	corner(f)
+	local hitEntry = rect(a, x, y, w, h, onClick)
+	return f, hitEntry
+end
+
+local function selectTab(tab)
+	activeTab = tab
+	for _, t in tabs do
+		local on = t == tab
+		set(t.page, { Position = UDim2.fromOffset(on and 0 or -10000, PAGE_Y) })
+		set(t.label, { TextColor3 = on and C.text or C.dim })
+		set(t.underline, { BackgroundTransparency = on and 0 or 1 })
+	end
+end
+
+local function addTab(name)
+	local i = #tabs + 1
+	local tw = 105
+	local x = 12 + (i - 1) * (tw + 4)
+	local page = make("Frame", root, {
+		Position = UDim2.fromOffset(i == 1 and 0 or -10000, PAGE_Y),
+		Size = UDim2.fromOffset(WIN_W, PAGE_H),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+	})
+	local label = text(root, x, TITLE_H, tw, TAB_H - 2, name, 12, C.dim, CENTER, FONT_BOLD)
+	local underline = frame(root, x, TITLE_H + TAB_H - 3, tw, 2, C.accent)
+	local tab = { name = name, page = page, label = label, underline = underline }
+	tabs[i] = tab
+	hits[#hits + 1] = { tab = nil, x = x, y = TITLE_H, w = tw, h = TAB_H, onClick = function() selectTab(tab) end }
+	return tab
+end
+
+frame(root, 0, 0, WIN_W, TITLE_H, C.title, true)
+frame(root, 0, 12, WIN_W, TITLE_H - 12, C.title)
+frame(root, 0, 0, WIN_W, 3, C.accent)
+text(root, 14, 4, WIN_W - 60, TITLE_H - 4, TITLE, 15, C.text, LEFT, FONT_BOLD)
+frame(root, 0, TITLE_H, WIN_W, TAB_H, C.bg)
+
+local closeLabel = make("TextLabel", root, {
+	Position = UDim2.fromOffset(WIN_W - 34, 6),
+	Size = UDim2.fromOffset(26, 24),
+	Text = "X",
+	TextSize = 13,
+	TextColor3 = C.text,
+	BackgroundColor3 = C.btn,
+	BorderSizePixel = 0,
+	Font = FONT_BOLD,
+})
+corner(closeLabel)
+hits[#hits + 1] = {
+	tab = nil, x = WIN_W - 34, y = 6, w = 26, h = 24,
+	onClick = function() state.running = false end,
+}
+
+frame(root, 0, WIN_H - 26, WIN_W, 26, C.title, true)
+frame(root, 0, WIN_H - 26, WIN_W, 12, C.title)
+local statusLabel = text(root, 12, WIN_H - 26, WIN_W - 24, 26, "Looking for your plot...", 12, C.dim)
+
+local lastStatus = ""
+local function setStatus(msg)
+	if msg ~= lastStatus then
+		lastStatus = msg
+		set(statusLabel, { Text = msg })
+	end
+end
+
+local statusHoldUntil = 0
+local function flash(msg)
+	setStatus(msg)
+	statusHoldUntil = os.clock() + 4
+end
+
+local SUFFIX = { k = 1e3, m = 1e6, b = 1e9, t = 1e12, qa = 1e15 }
+
+local function parseNumber(str)
+	if type(str) ~= "string" then return nil end
+	local s = string.lower((string.gsub(str, ",", "")))
+	local num, suf = string.match(s, "(%d+%.?%d*)%s*([a-z]*)")
+	if not num then return nil end
+	return tonumber(num) * (SUFFIX[suf] or 1)
+end
+
+local function fmt(n)
+	local rev = string.reverse(string.format("%.0f", n))
+	rev = string.gsub(rev, "(%d%d%d)", "%1,")
+	local out = string.reverse(rev)
+	if string.sub(out, 1, 1) == "," then out = string.sub(out, 2) end
+	return out
+end
+
+local function hasName(str, name)
+	if type(str) ~= "string" or type(name) ~= "string" or name == "" then
+		return false
+	end
+	str, name = string.lower(str), string.lower(name)
+	local init = 1
+	while true do
+		local s, e = string.find(str, name, init, true)
+		if not s then return false end
+		local before = s > 1 and string.sub(str, s - 1, s - 1) or ""
+		local after = string.sub(str, e + 1, e + 1)
+		if not string.match(before, "[%w_]") and not string.match(after, "[%w_]") then
+			return true
+		end
+		init = s + 1
+	end
+end
+
+local function signTitle(plot)
+	local entrance = plot:FindFirstChild("Entrance")
+	local sign = entrance and entrance:FindFirstChild("Sign")
+	local sg = sign and sign:FindFirstChild("SignGui_Front")
+	local fr = sg and sg:FindFirstChild("Frame")
+	local title = fr and fr:FindFirstChild("Title")
+	if not title then return nil end
+	return title.Text
+end
+
+local function findMyPlot()
+	local plotsFolder = Workspace:FindFirstChild("IsraelTycoons")
+	if not plotsFolder then return nil end
+	for _, plot in plotsFolder:GetChildren() do
+		local t = signTitle(plot)
+		if hasName(t, lp.Name) or hasName(t, lp.DisplayName) then
+			return plot
+		end
+	end
+	return nil
+end
+
+local function getPlotCFrame(plot)
+	local pad = plot:FindFirstChild("CashPad")
+	if pad then
+		return CFrame.new(pad:GetPivot().Position + Vector3.new(0, 3, 0))
+	end
+	local entrance = plot:FindFirstChild("Entrance")
+	if entrance then
+		return CFrame.new(entrance:GetPivot().Position + Vector3.new(0, 3, 0))
+	end
+	local ok, cf = pcall(function() return plot:GetBoundingBox() end)
+	if ok and cf then
+		return CFrame.new(cf.Position + Vector3.new(0, 3, 0))
+	end
+	return CFrame.new(plot:GetPivot().Position + Vector3.new(0, 3, 0))
+end
+
+local COST_KEYS = { "Price", "Cost", "price", "cost", "Amount" }
+
+local function valueOf(inst)
+	local ok, v = pcall(function() return inst.Value end)
+	if ok then return v end
+end
+
+local function readCost(inst)
+	local attrs = inst:GetAttributes()
+	for _, k in COST_KEYS do
+		local v = attrs[k]
+		if type(v) == "number" then return v end
+		if type(v) == "string" then
+			local n = parseNumber(v)
+			if n then return n end
+		end
+	end
+	local best
+	for _, d in inst:GetDescendants() do
+		local cls = d.ClassName
+		if (cls == "NumberValue" or cls == "IntValue" or cls == "StringValue") and table.find(COST_KEYS, d.Name) then
+			local v = valueOf(d)
+			if type(v) == "number" then return v end
+			if type(v) == "string" then
+				local n = parseNumber(v)
+				if n then return n end
+			end
+		elseif cls == "TextLabel" or cls == "TextButton" then
+			local t = d.Text
+			if type(t) == "string" and string.find(t, "%d") then
+				if string.find(t, "$", 1, true) or d.Name == "Price" or d.Name == "Cost" then
+					local n = parseNumber(t)
+					if n then return n end
+				end
+				best = best or parseNumber(t)
+			end
+		end
+	end
+	return best
+end
+
+local MONEY_KEYS = { "Cash", "Money", "Coins", "Gold", "Balance" }
+
+local function readMoney()
+	local ls = lp:FindFirstChild("leaderstats")
+	if ls then
+		for _, k in MONEY_KEYS do
+			local v = ls:FindFirstChild(k)
+			if v then
+				local val = valueOf(v)
+				if type(val) == "number" then return val end
+			end
+		end
+		for _, v in ls:GetChildren() do
+			if v.ClassName == "NumberValue" or v.ClassName == "IntValue" then
+				local val = valueOf(v)
+				if type(val) == "number" then return val end
+			end
+		end
+	end
+	local attrs = lp:GetAttributes()
+	for _, k in MONEY_KEYS do
+		if type(attrs[k]) == "number" then return attrs[k] end
+	end
+	return nil
+end
+
+local PAD_MONEY_KEYS = { "Cash", "Money", "Stored", "Amount", "Balance", "Collected", "Value" }
+
+local function readPadMoney(pad)
+	local attrs = pad:GetAttributes()
+	for _, k in PAD_MONEY_KEYS do
+		local v = attrs[k]
+		if type(v) == "number" then return v end
+		if type(v) == "string" then
+			local n = parseNumber(v)
+			if n then return n end
+		end
+	end
+	local best
+	for _, d in pad:GetDescendants() do
+		local cls = d.ClassName
+		if (cls == "NumberValue" or cls == "IntValue" or cls == "StringValue") and table.find(PAD_MONEY_KEYS, d.Name) then
+			local v = valueOf(d)
+			if type(v) == "number" then return v end
+			if type(v) == "string" then
+				local n = parseNumber(v)
+				if n then return n end
+			end
+		elseif cls == "TextLabel" or cls == "TextButton" then
+			local t = d.Text
+			if type(t) == "string" and string.find(t, "%d") then
+				if string.find(t, "$", 1, true) then
+					local n = parseNumber(t)
+					if n then return n end
+				end
+				best = best or parseNumber(t)
+			end
+		end
+	end
+	return best
+end
+
+local PAD_NAMES = { "Pad", "Button", "Touch", "Trigger", "Hitbox" }
+
+local function padCFrame(inst)
+	local target
+	if inst:IsA("BasePart") then
+		target = inst
+	else
+		for _, n in PAD_NAMES do
+			local f = inst:FindFirstChild(n, true)
+			if f and f:IsA("BasePart") then
+				target = f
+				break
+			end
+		end
+	end
+	if target then
+		return CFrame.new(target.Position + Vector3.new(0, target.Size.Y / 2 + 3, 0))
+	end
+	if inst:IsA("Model") then
+		local ok, cf, size = pcall(function() return inst:GetBoundingBox() end)
+		if ok and cf then
+			return CFrame.new(cf.Position + Vector3.new(0, size.Y / 2 + 3, 0))
+		end
+	end
+	return CFrame.new(inst:GetPivot().Position + Vector3.new(0, 3, 0))
+end
+
+local myPlot
+local entries = {}
+local money
+local page = 1
+local lastSig = ""
+
+local function canAfford(e)
+	if not e.cost or not money then return true end
+	return money >= e.cost
+end
+
+local function buildEntries()
+	local folder = myPlot and myPlot:FindFirstChild("Buttons")
+	local list = {}
+	if folder then
+		for _, b in folder:GetChildren() do
+			list[#list + 1] = { inst = b, name = b.Name, cost = readCost(b) }
+		end
+	end
+	table.sort(list, function(a, b)
+		local ac, bc = a.cost, b.cost
+		if ac and bc then
+			if ac ~= bc then return ac < bc end
+			return a.name < b.name
+		end
+		if ac then return true end
+		if bc then return false end
+		return a.name < b.name
+	end)
+	return list
+end
+
+-- ==================== PLOT TAB ====================
+local plotTab = addTab("Plot")
+local card = frame(plotTab.page, 12, 8, WIN_W - 24, PAGE_H - 16, C.card, true)
+local area = newArea(plotTab, card, 12, 8)
+
+text(card, 14, 8, 200, 18, "ITEM", 11, C.dim, LEFT, FONT_BOLD)
+text(card, 270, 8, 130, 18, "COST", 11, C.dim, CENTER, FONT_BOLD)
+
+local rows = {}
+
+local function goTo(e)
+	local char = lp.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		flash("couldn't find your character root part")
+		return
+	end
+	local originalCFrame = hrp.CFrame
+
+	local ok, cf = pcall(padCFrame, e.inst)
+	if not ok then
+		flash("couldn't find the pad for " .. e.name)
+		return
+	end
+
+	lw.teleport(cf)
+	task.wait(0.3)
+	lw.teleport(originalCFrame)
+	flash("Bought / Visited " .. e.name)
+end
+
+for i = 1, ROWS do
+	local y = 32 + (i - 1) * 34
+	local r = {}
+	r.bg = frame(card, 8, y - 2, WIN_W - 40, 32, C.bg, true)
+	r.name = text(card, 16, y, 250, 28, "", 13)
+	r.cost = text(card, 270, y, 130, 28, "", 13, C.text, CENTER)
+	r.btn = button(area, 410, y, 112, 28, "", function()
+		local e = r.entry
+		if e and canAfford(e) then
+			goTo(e)
+		end
+	end)
+	rows[i] = r
+end
+
+local pageLabel = text(card, 120, 382, 100, 24, "Page 1 / 1", 12, C.dim, CENTER)
+
+local function renderRows()
+	local pages = math.max(1, math.ceil(#entries / ROWS))
+	page = math.clamp(page, 1, pages)
+	for i = 1, ROWS do
+		local e = entries[(page - 1) * ROWS + i]
+		local r = rows[i]
+		r.entry = e
+		if e then
+			local ok = canAfford(e)
+			set(r.bg, { BackgroundTransparency = 0 })
+			set(r.name, { Text = e.name })
+			set(r.cost, { Text = e.cost and ("$" .. fmt(e.cost)) or "?" })
+			set(r.btn, {
+				Text = ok and "Buy" or "Can't afford",
+				BackgroundTransparency = 0,
+				BackgroundColor3 = ok and C.accent or C.off,
+				TextColor3 = ok and C.text or C.dim,
+			})
+		else
+			set(r.bg, { BackgroundTransparency = 1 })
+			set(r.name, { Text = "" })
+			set(r.cost, { Text = "" })
+			set(r.btn, { Text = "", BackgroundTransparency = 1 })
+		end
+	end
+	set(pageLabel, { Text = string.format("Page %d / %d", page, pages) })
+end
+
+button(area, 14, 382, 96, 24, "Prev", function()
+	page -= 1
+	renderRows()
+end)
+
+button(area, 230, 382, 96, 24, "Next", function()
+	page += 1
+	renderRows()
+end)
+
+local autoBuyBtn
+autoBuyBtn = button(area, 340, 382, 182, 24, "Auto-Buy: OFF", function()
+	settingsState.autoBuy = not settingsState.autoBuy
+	set(autoBuyBtn, {
+		Text = settingsState.autoBuy and "Auto-Buy: ON" or "Auto-Buy: OFF",
+		BackgroundColor3 = settingsState.autoBuy and C.good or C.btn
+	})
+	flash(settingsState.autoBuy and "Auto-Buy enabled" or "Auto-Buy disabled")
+end)
+
+local function dumpDebug()
+	local lines = {}
+	local function log(...)
+		local parts = table.pack(...)
+		for i = 1, parts.n do parts[i] = tostring(parts[i]) end
+		lines[#lines + 1] = table.concat(parts, " ")
+	end
+	log("plot:", myPlot and myPlot.Name or "nil")
+	log("money read:", readMoney())
+	local out = table.concat(lines, "\n")
+	pcall(writefile, "israel_tycoon_debug.txt", out)
+	pcall(setclipboard, out)
+	flash("Debug info copied and saved!")
+end
+
+button(area, 382, 346, 140, 24, "Copy debug info", dumpDebug)
+
+-- ==================== COLLECT TAB ====================
+local COLLECT_WAIT = 0.6
+local collecting = false
+local padMoney
+local lastPadText = ""
+
+local function collectMoney()
+	if collecting then return end
+	local pad = myPlot and myPlot:FindFirstChild("CashPad")
+	local char = lp.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not pad or not hrp then return end
+	collecting = true
+	local back = hrp.CFrame
+	local before = padMoney
+	lw.teleport(pad)
+	task.wait(COLLECT_WAIT)
+	lw.teleport(back)
+	collecting = false
+	if not settingsState.autoCollect then
+		flash(before and ("Collected about $" .. fmt(before)) or "Collected")
+	end
+end
+
+local collectTab = addTab("Collect")
+local cCard = frame(collectTab.page, 12, 8, WIN_W - 24, 220, C.card, true)
+local cArea = newArea(collectTab, cCard, 12, 8)
+
+text(cCard, 14, 8, 200, 18, "CASH PAD", 11, C.dim, LEFT, FONT_BOLD)
+local cashLabel = text(cCard, 0, 32, WIN_W - 24, 46, "?", 34, C.good, CENTER, FONT_BOLD)
+text(cCard, 0, 80, WIN_W - 24, 20, "waiting to be collected", 12, C.dim, CENTER)
+
+button(cArea, (WIN_W - 24 - 240) / 2, 108, 240, 38, "Collect money", function()
+	task.spawn(collectMoney)
+end)
+
+local autoCollectBtn
+autoCollectBtn = button(cArea, 14, 156, 240, 28, "Auto-Collect: OFF", function()
+	settingsState.autoCollect = not settingsState.autoCollect
+	set(autoCollectBtn, {
+		Text = settingsState.autoCollect and "Auto-Collect: ON" or "Auto-Collect: OFF",
+		BackgroundColor3 = settingsState.autoCollect and C.good or C.btn
+	})
+	flash(settingsState.autoCollect and "Auto-Collect enabled" or "Auto-Collect disabled")
+end)
+
+local intervalLabel = text(cCard, 270, 156, 240, 28, "Interval: 5s", 13, C.text, CENTER)
+button(cArea, 270, 156, 240, 28, "", function()
+	if settingsState.autoCollectInterval == 3 then
+		settingsState.autoCollectInterval = 5
+	elseif settingsState.autoCollectInterval == 5 then
+		settingsState.autoCollectInterval = 10
+	else
+		settingsState.autoCollectInterval = 3
+	end
+	set(intervalLabel, { Text = "Interval: " .. settingsState.autoCollectInterval .. "s" })
+end)
+set(intervalLabel, { ZIndex = 2 })
+
+button(cArea, 14, 192, 140, 24, "Copy debug info", dumpDebug)
+
+-- ==================== TELEPORTS TAB ====================
+local teleportsTab = addTab("Teleports")
+local tCard = frame(teleportsTab.page, 12, 8, WIN_W - 24, PAGE_H - 16, C.card, true)
+local tArea = newArea(teleportsTab, tCard, 12, 8)
+
+text(tCard, 14, 8, 300, 18, "QUICK PLOT TELEPORTS", 11, C.dim, LEFT, FONT_BOLD)
+
+local function teleportToPlot(plotInst)
+	local cf = getPlotCFrame(plotInst)
+	lw.teleport(cf)
+	flash("Teleported to " .. plotInst.Name)
+end
+
+button(tArea, 14, 32, WIN_W - 52, 34, "Teleport to My Plot", function()
+	if myPlot then
+		teleportToPlot(myPlot)
+	else
+		flash("Your plot is not found yet!")
+	end
+end)
+
+local otherPlotsContainer = frame(tCard, 14, 76, WIN_W - 52, PAGE_H - 96, C.bg, true)
+local otherPlotsArea = newArea(teleportsTab, otherPlotsContainer, 12 + 14, 8 + 76)
+local otherPlotButtons = {}
+local lastPlotSig = ""
+
+local function updateTeleportsList()
+	local plotsFolder = Workspace:FindFirstChild("IsraelTycoons")
+	if not plotsFolder then return end
+
+	local plots = plotsFolder:GetChildren()
+	table.sort(plots, function(a, b)
+		local numA = tonumber(string.match(a.Name, "%d+"))
+		local numB = tonumber(string.match(b.Name, "%d+"))
+		if numA and numB and numA ~= numB then
+			return numA < numB
+		end
+		return a.Name < b.Name
+	end)
+
+	local sigParts = {}
+	for _, p in plots do
+		sigParts[#sigParts + 1] = p.Name
+	end
+	local sig = table.concat(sigParts, "|")
+	if sig == lastPlotSig and #otherPlotButtons > 0 then
+		return
+	end
+	lastPlotSig = sig
+
+	for _, btn in otherPlotButtons do
+		if btn and btn.Parent then btn:Destroy() end
+	end
+	otherPlotButtons = {}
+
+	for i = #hits, 1, -1 do
+		if hits[i].isDynamicPlot then
+			table.remove(hits, i)
+		end
+	end
+
+	local colW = math.floor((WIN_W - 82) / 2)
+	for i, plot in ipairs(plots) do
+		local col = (i - 1) % 2
+		local row = math.floor((i - 1) / 2)
+		local xOffset = 10 + col * (colW + 10)
+		local yOffset = 10 + row * 40
+
+		local labelText = plot.Name
+		if plot == myPlot then
+			labelText = labelText .. " (Yours)"
+		end
+
+		local pBtn, hitEntry = button(otherPlotsArea, xOffset, yOffset, colW, 32, labelText, function()
+			teleportToPlot(plot)
+		end)
+		if plot == myPlot then
+			set(pBtn, { BackgroundColor3 = C.accent })
+		end
+		hitEntry.isDynamicPlot = true
+		otherPlotButtons[#otherPlotButtons + 1] = pBtn
+	end
+end
+
+-- ==================== KING OF THE HILL TAB ====================
+local kothTab = addTab("KOTH")
+local kCard = frame(kothTab.page, 12, 8, WIN_W - 24, PAGE_H - 16, C.card, true)
+local kArea = newArea(kothTab, kCard, 12, 8)
+
+text(kCard, 14, 8, 250, 18, "KING OF THE HILL STATUS", 11, C.dim, LEFT, FONT_BOLD)
+local kothStatusLabel = text(kCard, 14, 32, WIN_W - 52, 40, "Checking Capture Zone...", 14, C.accent, CENTER, FONT_BOLD)
+
+local function getCaptureZone()
+	local map = Workspace:FindFirstChild("Map")
+	return map and map:FindFirstChild("CaptureZone")
+end
+
+local function getCaptureText()
+	local zone = getCaptureZone()
+	if not zone then return "" end
+	
+	local ownerAttr = zone:GetAttribute("Owner") or zone:GetAttribute("Team") or zone:GetAttribute("CapturedBy")
+	if type(ownerAttr) == "string" and ownerAttr ~= "" then
+		return ownerAttr
+	end
+
+	for _, d in zone:GetDescendants() do
+		if d.ClassName == "TextLabel" or d.ClassName == "TextButton" then
+			local t = d.Text
+			if type(t) == "string" and #t > 0 and #t < 60 then
+				local lt = string.lower(t)
+				if lt ~= "king of the hill" and lt ~= "capture zone" then
+					return t
+				end
+			end
+		elseif d.ClassName == "StringValue" then
+			local n = string.lower(d.Name)
+			if string.find(n, "owner") or string.find(n, "team") or string.find(n, "captur") then
+				if type(d.Value) == "string" and d.Value ~= "" then
+					return d.Value
+				end
+			end
+		end
+	end
+	return ""
+end
+
+local function readCaptureOwner()
+	local text = getCaptureText()
+	if text == "" then return "Uncaptured / Neutral" end
+	return text
+end
+
+local capturingKoth = false
+
+local function captureHill()
+	if capturingKoth then return end
+	capturingKoth = true
+
+	local zone = getCaptureZone()
+	if not zone then
+		flash("CaptureZone not found in Workspace.Map!")
+		capturingKoth = false
+		return
+	end
+
+	local char = lp.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChild("Humanoid")
+	if not hrp or not hum then
+		capturingKoth = false
+		return
+	end
+
+	local zoneCFrame
+	if zone:IsA("BasePart") then
+		zoneCFrame = zone.CFrame
+	else
+		zoneCFrame = zone:GetPivot()
+	end
+
+	local originalWalkSpeed = hum.WalkSpeed
+	hum.WalkSpeed = 0
+
+	lw.teleport(zoneCFrame)
+	task.wait(3.5)
+
+	local timeout = os.clock() + 45
+	local captured = false
+	local hasSeenPercent = false
+
+	while os.clock() < timeout do
+		if not hrp or not hrp.Parent then break end
+		
+		if (hrp.Position - zoneCFrame.Position).Magnitude > 10 then
+			lw.teleport(zoneCFrame)
+		end
+		
+		local text = getCaptureText()
+		local lt = string.lower(text)
+		
+		local percent = tonumber(string.match(lt, "(%d+)%%"))
+		
+		if percent then
+			hasSeenPercent = true
+			if percent >= 100 then
+				captured = true
+				break
+			end
+		else
+			if hasSeenPercent and (string.find(lt, string.lower(lp.Name)) or string.find(lt, string.lower(lp.DisplayName))) then
+				captured = true
+				break
+			end
+		end
+		
+		task.wait(0.2)
+	end
+
+	hum.WalkSpeed = originalWalkSpeed
+
+	if myPlot then
+		lw.teleport(getPlotCFrame(myPlot))
+	end
+	
+	capturingKoth = false
+	if captured then
+		flash("Successfully captured the Hill! Returned to base.")
+	else
+		flash("Capture timeout! Returned to base.")
+	end
+end
+
+button(kArea, 14, 84, WIN_W - 52, 42, "Manual Capture Hill", function()
+	task.spawn(captureHill)
+end)
+
+local autoKothBtn
+autoKothBtn = button(kArea, 14, 140, WIN_W - 52, 34, "Auto-Capture Hill: OFF", function()
+	settingsState.autoKoth = not settingsState.autoKoth
+	set(autoKothBtn, {
+		Text = settingsState.autoKoth and "Auto-Capture Hill: ON" or "Auto-Capture Hill: OFF",
+		BackgroundColor3 = settingsState.autoKoth and C.good or C.btn
+	})
+	flash(settingsState.autoKoth and "Auto-KOTH enabled" or "Auto-KOTH disabled")
+end)
+
+local kothIntervalLabel = text(kCard, 14, 184, WIN_W - 52, 24, "Check Interval: 10s", 13, C.text, CENTER)
+button(kArea, 14, 184, WIN_W - 52, 28, "", function()
+	if settingsState.autoKothInterval == 5 then
+		 settingsState.autoKothInterval = 10
+	elseif settingsState.autoKothInterval == 10 then
+		settingsState.autoKothInterval = 20
+	else
+		settingsState.autoKothInterval = 5
+	end
+	set(kothIntervalLabel, { Text = "Check Interval: " .. settingsState.autoKothInterval .. "s" })
+end)
+set(kothIntervalLabel, { ZIndex = 2 })
+
+-- ==================== COMBAT TAB ====================
+local combatTab = addTab("Combat")
+local combCard = frame(combatTab.page, 12, 8, WIN_W - 24, PAGE_H - 16, C.card, true)
+local combArea = newArea(combatTab, combCard, 12, 8)
+
+text(combCard, 14, 8, 250, 18, "WEAPON EQUIPPER", 11, C.dim, LEFT, FONT_BOLD)
+
+local function equipWeapon(weaponKeyword)
+	if not myPlot then return end
+	flash("Equipping " .. weaponKeyword .. "...")
+	
+	local items = myPlot:FindFirstChild("Items")
+	local targetPad
+
+	if items then
+		for _, item in items:GetChildren() do
+			if string.find(string.lower(item.Name), string.lower(weaponKeyword)) then
+				local giver = item:FindFirstChild("WeaponGiver")
+				if giver then
+					targetPad = giver
+					break
+				end
+			end
+		end
+	end
+
+	if targetPad then
+		local char = lp.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if not hrp then return end
+		local back = hrp.CFrame
+		
+		lw.teleport(padCFrame(targetPad))
+		task.wait(0.2)
+		lw.teleport(back)
+	else
+		flash("Couldn't find pad for " .. weaponKeyword)
+	end
+end
+
+button(combArea, 14, 32, 120, 30, "Equip Shotgun", function() equipWeapon("fusilpompe") end)
+button(combArea, 140, 32, 120, 30, "Equip M16", function() equipWeapon("m16") end)
+button(combArea, 266, 32, 120, 30, "Equip Uzi", function() equipWeapon("uzi") end)
+button(combArea, 392, 32, 120, 30, "Equip Deagle", function() equipWeapon("deserteagle") end)
+
+button(combArea, 14, 70, 120, 30, "Equip X95", function() equipWeapon("x95") end)
+button(combArea, 140, 70, 120, 30, "Equip Tavor", function() equipWeapon("tavor") end)
+
+-- Glitch Multi-Equip Logic
+local function glitchEquipAll()
+	local backpack = lp:FindFirstChild("Backpack")
+	local char = lp.Character
+	local hum = char and char:FindFirstChild("Humanoid")
+	if not backpack or not hum then return end
+	
+	local tools = {}
+	for _, item in ipairs(backpack:GetChildren()) do
+		if item:IsA("Tool") then
+			table.insert(tools, item)
+		end
+	end
+	
+	if #tools > 0 then
+		flash("Glitch Equipping " .. #tools .. " guns...")
+		task.spawn(function()
+			for i = 1, 15 do
+				for _, tool in ipairs(tools) do
+					pcall(function() hum:EquipTool(tool) end)
+					task.wait(0.01)
+				end
+			end
+			flash("Done! Try shooting.")
+		end)
+	else
+		flash("No guns in backpack!")
+	end
+end
+
+button(combArea, 266, 70, 246, 30, "Glitch Multi-Equip", function() glitchEquipAll() end)
+
+text(combCard, 14, 114, 250, 18, "TARGET PLAYERS (Click to Select Multi)", 11, C.dim, LEFT, FONT_BOLD)
+
+local selectedPlayers = {}
+local playerListContainer = frame(combCard, 14, 134, WIN_W - 52, 170, C.bg, true)
+local playerButtons = {}
+local lastPlayerSig = ""
+
+local function updatePlayerList()
+	local pList = Players:GetPlayers()
+	table.sort(pList, function(a,b) return a.Name < b.Name end)
+	
+	local sig = ""
+	for _, p in ipairs(pList) do sig = sig .. p.Name .. "|" end
+	
+	if sig == lastPlayerSig and #playerButtons > 0 then return end
+	lastPlayerSig = sig
+	
+	for _, b in playerButtons do b:Destroy() end
+	playerButtons = {}
+	
+	for i = #hits, 1, -1 do
+		if hits[i].isDynamicPlayer then table.remove(hits, i) end
+	end
+	
+	local colW = math.floor((WIN_W - 82) / 2)
+	for i, p in ipairs(pList) do
+		if p ~= lp then
+			local idx = #playerButtons
+			local col = idx % 2
+			local row = math.floor(idx / 2)
+			local x = 10 + col * (colW + 10)
+			local y = 10 + row * 40
+			
+			local isSelected = selectedPlayers[p.Name] == true
+			local pBtn, hitEntry = button(newArea(combatTab, playerListContainer, 14, 134), x, y, colW, 32, p.Name, nil)
+			
+			if isSelected then
+				set(pBtn, { BackgroundColor3 = C.accent })
+			end
+			
+			hitEntry.onClick = function()
+				if selectedPlayers[p.Name] then
+					selectedPlayers[p.Name] = nil
+					set(pBtn, { BackgroundColor3 = C.btn })
+				else
+					selectedPlayers[p.Name] = true
+					set(pBtn, { BackgroundColor3 = C.accent })
+				end
+			end
+			
+			hitEntry.isDynamicPlayer = true
+			playerButtons[#playerButtons + 1] = pBtn
+		end
+	end
+end
+
+local function executeTarget(playerName, backpack)
+	local targetPlayer = Players:FindFirstChild(playerName)
+	if not targetPlayer or not targetPlayer.Character then return false end
+	
+	local hrp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+	local hum = targetPlayer.Character:FindFirstChild("Humanoid")
+	if not hrp or not hum then return false end
+	
+	flash("Executing " .. playerName .. "...")
+	local camera = Workspace.CurrentCamera
+	local originalCameraType = camera.CameraType
+	local originalMinZoom = lp.CameraMinZoomDistance
+	local originalMaxZoom = lp.CameraMaxZoomDistance
+
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.CameraSubject = nil
+	lp.CameraMinZoomDistance = 0.5
+	lp.CameraMaxZoomDistance = 0.5
+
+	local angle = 0
+	local spinRadius = 6 
+	local teleportRadius = 3 
+	
+	-- Release any previous click just in case
+	pcall(function() VirtualUser:Button1Up(Vector2.new(0, 0)) end)
+
+	for i = 1, 200 do 
+		if not hrp or not hrp.Parent or hum.Health <= 0 then break end
+		
+		angle = angle + math.rad(45) 
+		
+		-- 1. SPECTATOR CAMERA
+		local offsetX = math.cos(angle) * spinRadius
+		local offsetZ = math.sin(angle) * spinRadius
+		local camPos = hrp.Position + Vector3.new(offsetX, 2, offsetZ)
+		camera.CFrame = CFrame.new(camPos, hrp.Position)
+		
+		-- 2. TELEPORT (Throttled to avoid hitting the 20 calls/sec limit)
+		local tpX = math.cos(angle) * teleportRadius
+		local tpZ = math.sin(angle) * teleportRadius
+		local tpPos = hrp.Position + Vector3.new(tpX, 0, tpZ)
+		
+		pcall(function()
+			lw.teleport(CFrame.new(tpPos, hrp.Position))
+		end)
+		
+		-- 3. SHOOT: Fast click spam to simulate rapid fire
+		VirtualUser:Button1Down(Vector2.new(0, 0))
+		task.wait(0.01)
+		VirtualUser:Button1Up(Vector2.new(0, 0))
+		
+		-- Safety delay to not crash the client or hit teleport limit
+		task.wait(0.05)
+	end
+	
+	-- Release mouse on finish
+	pcall(function() VirtualUser:Button1Up(Vector2.new(0, 0)) end)
+
+	camera.CameraType = originalCameraType
+	lp.CameraMinZoomDistance = originalMinZoom
+	lp.CameraMaxZoomDistance = originalMaxZoom
+	
+	return hum.Health <= 0
+end
+
+local killSelectedBtn = button(combArea, 14, 314, WIN_W - 52, 42, "KILL SELECTED PLAYERS", function()
+	if next(selectedPlayers) == nil then
+		flash("No players selected!")
+		return
+	end
+	
+	local backpack = lp:FindFirstChild("Backpack")
+	local shotgun = backpack and (backpack:FindFirstChild("Shotgun") or backpack:FindFirstChild("ArmeFusilPompe"))
+	
+	if shotgun then
+		local hum = lp.Character and lp.Character:FindFirstChild("Humanoid")
+		if hum then
+			hum:EquipTool(shotgun)
+			task.wait(0.3)
+		end
+	else
+		flash("Shotgun not in inventory! Equipping manually...")
+		equipWeapon("fusilpompe")
+		task.wait(0.5)
+	end
+	
+	task.spawn(function()
+		-- GUARANTEE CAMERA RESET USING PCALL
+		local success, err = pcall(function()
+			for name, _ in pairs(selectedPlayers) do
+				executeTarget(name, backpack)
+			end
+		end)
+		
+		-- FORCE CAMERA BACK TO NORMAL NO MATTER WHAT
+		local camera = Workspace.CurrentCamera
+		camera.CameraType = Enum.CameraType.Custom
+		camera.CameraSubject = lp.Character and lp.Character:FindFirstChild("Humanoid")
+		lp.CameraMinZoomDistance = 0.5
+		lp.CameraMaxZoomDistance = 400
+		
+		if myPlot then lw.teleport(getPlotCFrame(myPlot)) end
+		flash("All targets executed.")
+	end)
+end)
+
+local killAllBtn = button(combArea, 14, 362, WIN_W - 52, 42, "KILL ALL PLAYERS", function()
+	local backpack = lp:FindFirstChild("Backpack")
+	local shotgun = backpack and (backpack:FindFirstChild("Shotgun") or backpack:FindFirstChild("ArmeFusilPompe"))
+	
+	if shotgun then
+		local hum = lp.Character and lp.Character:FindFirstChild("Humanoid")
+		if hum then
+			hum:EquipTool(shotgun)
+			task.wait(0.3)
+		end
+	end
+	
+	task.spawn(function()
+		-- GUARANTEE CAMERA RESET USING PCALL
+		local success, err = pcall(function()
+			-- Loop until everyone dies
+			while true do
+				local aliveTarget = nil
+				for _, p in ipairs(Players:GetPlayers()) do
+					if p ~= lp and p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+						aliveTarget = p.Name
+						break
+					end
+				end
+				
+				if not aliveTarget then break end -- Everyone is dead
+				
+				executeTarget(aliveTarget, backpack)
+			end
+		end)
+		
+		-- FORCE CAMERA BACK TO NORMAL NO MATTER WHAT
+		local camera = Workspace.CurrentCamera
+		camera.CameraType = Enum.CameraType.Custom
+		camera.CameraSubject = lp.Character and lp.Character:FindFirstChild("Humanoid")
+		lp.CameraMinZoomDistance = 0.5
+		lp.CameraMaxZoomDistance = 400
+		
+		if myPlot then lw.teleport(getPlotCFrame(myPlot)) end
+		flash("Killed everyone.")
+	end)
+end)
+
+-- ==================== UTILITY TAB ====================
+local utilTab = addTab("Utility")
+local uCard = frame(utilTab.page, 12, 8, WIN_W - 24, PAGE_H - 16, C.card, true)
+local uArea = newArea(utilTab, uCard, 12, 8)
+
+text(uCard, 14, 8, 250, 18, "UTILITY SETTINGS", 11, C.dim, LEFT, FONT_BOLD)
+
+local autoCratesBtn
+autoCratesBtn = button(uArea, 14, 32, WIN_W - 52, 34, "Auto-Claim Crates: OFF", function()
+	settingsState.autoCrates = not settingsState.autoCrates
+	set(autoCratesBtn, {
+		Text = settingsState.autoCrates and "Auto-Claim Crates: ON" or "Auto-Claim Crates: OFF",
+		BackgroundColor3 = settingsState.autoCrates and C.good or C.btn
+	})
+	flash(settingsState.autoCrates and "Auto-Claim enabled" or "Auto-Claim disabled")
+end)
+
+button(uArea, 14, 76, WIN_W - 52, 34, "Teleport to Shop", function()
+	local map = Workspace:FindFirstChild("Map")
+	local found
+	if map then
+		for _, d in map:GetDescendants() do
+			if (d.Name == "Shop" or d.Name == "Store" or d.Name == "GunShop") and d:IsA("BasePart") then
+				found = d
+				break
+			end
+		end
+	end
+	if found then
+		lw.teleport(CFrame.new(found.Position + Vector3.new(0, 3, 0)))
+		flash("Teleported to Shop!")
+	else
+		flash("Shop not found in Map!")
+	end
+end)
+
+local autoRebirthBtn
+autoRebirthBtn = button(uArea, 14, 120, WIN_W - 52, 34, "Auto-Rebirth: OFF", function()
+	settingsState.autoRebirth = not settingsState.autoRebirth
+	set(autoRebirthBtn, {
+		Text = settingsState.autoRebirth and "Auto-Rebirth: ON" or "Auto-Rebirth: OFF",
+		BackgroundColor3 = settingsState.autoRebirth and C.good or C.btn
+	})
+	flash(settingsState.autoRebirth and "Auto-Rebirth enabled" or "Auto-Rebirth disabled")
+end)
+
+-- ==================== MAIN LOOP ====================
+selectTab(plotTab)
+
+local lastAutoCollectTick = 0
+local lastAutoBuyTick = 0
+local lastAutoKothTick = 0
+local lastCrateTick = 0
+local lastRebirthTick = 0
+
+local function updateData()
+	if not myPlot then
+		myPlot = findMyPlot()
+	end
+	updateTeleportsList()
+	updatePlayerList()
+
+	money = readMoney()
+	entries = buildEntries()
+
+	local pad = myPlot and myPlot:FindFirstChild("CashPad")
+	padMoney = pad and readPadMoney(pad) or nil
+	local padText = padMoney and ("$" .. fmt(padMoney)) or "?"
+	if padText ~= lastPadText then
+		lastPadText = padText
+		set(cashLabel, { Text = padText })
+	end
+
+	local parts = { tostring(page), tostring(money) }
+	for _, e in entries do
+		parts[#parts + 1] = e.name .. ":" .. tostring(e.cost) .. ":" .. tostring(canAfford(e))
+	end
+	local sig = table.concat(parts, "|")
+	if sig ~= lastSig then
+		lastSig = sig
+		renderRows()
+	end
+
+	local currentOwner = readCaptureOwner()
+	set(kothStatusLabel, { Text = "King of the Hill: " .. tostring(currentOwner) })
+
+	if settingsState.autoCollect and (os.clock() - lastAutoCollectTick >= settingsState.autoCollectInterval) then
+		lastAutoCollectTick = os.clock()
+		task.spawn(collectMoney)
+	end
+
+	if settingsState.autoBuy and #entries > 0 and (os.clock() - lastAutoBuyTick >= 1.0) then
+		lastAutoBuyTick = os.clock()
+		local nextTarget = entries[1]
+		if nextTarget and canAfford(nextTarget) then
+			task.spawn(function()
+				goTo(nextTarget)
+			end)
+		end
+	end
+
+	if settingsState.autoKoth and not capturingKoth and (os.clock() - lastAutoKothTick >= settingsState.autoKothInterval) then
+		lastAutoKothTick = os.clock()
+		local ownerStr = string.lower(tostring(currentOwner))
+		if not string.find(ownerStr, string.lower(lp.Name)) then
+			task.spawn(captureHill)
+		end
+	end
+
+	if settingsState.autoCrates and (os.clock() - lastCrateTick >= 1.0) then
+		lastCrateTick = os.clock()
+		task.spawn(function()
+			local char = lp.Character
+			local hrp = char and char:FindFirstChild("HumanoidRootPart")
+			if not hrp then return end
+			
+			for _, d in Workspace:GetChildren() do
+				local name = string.lower(d.Name)
+				if (string.find(name, "crate") or string.find(name, "box")) and not d:IsDescendantOf(lp.Character) then
+					local pos = d:IsA("Model") and d:GetPivot().Position or (d:IsA("BasePart") and d.Position)
+					if pos then
+						lw.teleport(CFrame.new(pos + Vector3.new(0, 3, 0)))
+						task.wait(0.2)
+					end
+				end
+			end
+		end)
+	end
+
+	if settingsState.autoRebirth and (os.clock() - lastRebirthTick >= 2.0) then
+		lastRebirthTick = os.clock()
+		if money and money >= 1000000 then
+			task.spawn(function()
+				if myPlot then
+					for _, d in myPlot:GetDescendants() do
+						local name = string.lower(d.Name)
+						if string.find(name, "rebirth") then
+							local ok, cf = pcall(padCFrame, d)
+							if ok then
+								lw.teleport(cf)
+								task.wait(0.3)
+								lw.teleport(getPlotCFrame(myPlot))
+								flash("Auto-Rebirthed!")
+								break
+							end
+						end
+					end
+				end
+			end)
+		end
+	end
+
+	if os.clock() >= statusHoldUntil then
+		if not myPlot then
+			setStatus("Looking for your plot...")
+		else
+			setStatus(string.format("Plot: %s   Money: %s   Buttons: %d", myPlot.Name, money and fmt(money) or "?", #entries))
+		end
+	end
+end
+
+local dragging = false
+local dragOffset = Vector2.new(0, 0)
+
+local function inRect(m, x, y, w, h)
+	return m.X >= x and m.X <= x + w and m.Y >= y and m.Y <= y + h
+end
+
+UIS.InputBegan:Connect(function(inp)
+	if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+		if not state.shown then return end
+		local m = UIS:GetMouseLocation()
+		local top = origin + Vector2.new(0, INSET_Y)
+
+		for _, h in hits do
+			if (h.tab == nil or h.tab == activeTab) and inRect(m, top.X + h.x, top.Y + h.y, h.w, h.h) then
+				h.onClick()
+				return
+			end
+		end
+
+		if inRect(m, top.X, top.Y, WIN_W, TITLE_H) then
+			dragging = true
+			dragOffset = m - top
+		end
+	elseif inp.KeyCode == HIDE_KEY then
+		state.shown = not state.shown
+		set(root, { Visible = state.shown })
+	end
+end)
+
+UIS.InputEnded:Connect(function(inp)
+	if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = false
+	end
+end)
+
+RunService.RenderStepped:Connect(function()
+	if not dragging then return end
+	local m = UIS:GetMouseLocation()
+	local vp = lw.viewport()
+	local pos = m - dragOffset - Vector2.new(0, INSET_Y)
+	origin = Vector2.new(
+		math.clamp(pos.X, 0, math.max(0, vp.X - WIN_W)),
+		math.clamp(pos.Y, 0, math.max(0, vp.Y - WIN_H))
+	)
+	set(root, { Position = UDim2.fromOffset(origin.X, origin.Y) })
+end)
+
+while state.running do
+	local ok, err = pcall(updateData)
+	if not ok then
+		warn("refresh failed: " .. tostring(err))
+	end
+	task.wait(REFRESH_EVERY)
+end
+
+gui:Destroy()
+print("israel tycoon gui closed")

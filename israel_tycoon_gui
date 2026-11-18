@@ -21,6 +21,7 @@ local settingsState = {
 	autoKothInterval = 10,
 	autoCrates = false,
 	autoRebirth = false,
+	autoKillAll = false,
 }
 
 local warned = {}
@@ -1111,19 +1112,11 @@ local killAllBtn = button(combArea, 14, 362, WIN_W - 52, 42, "KILL ALL PLAYERS",
 	task.spawn(function()
 		-- GUARANTEE CAMERA RESET USING PCALL
 		local success, err = pcall(function()
-			-- Loop until everyone dies
-			while true do
-				local aliveTarget = nil
-				for _, p in ipairs(Players:GetPlayers()) do
-					if p ~= lp and p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
-						aliveTarget = p.Name
-						break
-					end
+			-- Loop exactly ONCE through the player list
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= lp and p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+					executeTarget(p.Name, backpack)
 				end
-				
-				if not aliveTarget then break end -- Everyone is dead
-				
-				executeTarget(aliveTarget, backpack)
 			end
 		end)
 		
@@ -1135,8 +1128,19 @@ local killAllBtn = button(combArea, 14, 362, WIN_W - 52, 42, "KILL ALL PLAYERS",
 		lp.CameraMaxZoomDistance = 400
 		
 		if myPlot then lw.teleport(getPlotCFrame(myPlot)) end
-		flash("Killed everyone.")
+		flash("Killed everyone in list.")
 	end)
+end)
+
+-- Auto-Kill All Toggle Button
+local autoKillBtn
+autoKillBtn = button(combArea, 14, 410, WIN_W - 52, 30, "Auto-Kill All: OFF", function()
+	settingsState.autoKillAll = not settingsState.autoKillAll
+	set(autoKillBtn, {
+		Text = settingsState.autoKillAll and "Auto-Kill All: ON" or "Auto-Kill All: OFF",
+		BackgroundColor3 = settingsState.autoKillAll and C.good or C.btn
+	})
+	flash(settingsState.autoKillAll and "Auto-Kill All enabled" or "Auto-Kill All disabled")
 end)
 
 -- ==================== UTILITY TAB ====================
@@ -1289,6 +1293,39 @@ local function updateData()
 				end
 			end)
 		end
+	end
+
+	-- Auto-Kill All background loop
+	if settingsState.autoKillAll then
+		task.spawn(function()
+			local backpack = lp:FindFirstChild("Backpack")
+			local shotgun = backpack and (backpack:FindFirstChild("Shotgun") or backpack:FindFirstChild("ArmeFusilPompe"))
+			
+			if shotgun then
+				local hum = lp.Character and lp.Character:FindFirstChild("Humanoid")
+				if hum then
+					hum:EquipTool(shotgun)
+					task.wait(0.3)
+				end
+			end
+
+			-- Loop through all alive players once per cycle
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= lp and p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+					executeTarget(p.Name, backpack)
+				end
+			end
+			
+			-- Return to base after killing everyone
+			if myPlot then
+				local camera = Workspace.CurrentCamera
+				camera.CameraType = Enum.CameraType.Custom
+				camera.CameraSubject = lp.Character and lp.Character:FindFirstChild("Humanoid")
+				lp.CameraMinZoomDistance = 0.5
+				lp.CameraMaxZoomDistance = 400
+				lw.teleport(getPlotCFrame(myPlot))
+			end
+		end)
 	end
 
 	if os.clock() >= statusHoldUntil then
